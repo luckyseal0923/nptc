@@ -1,8 +1,11 @@
 export const STATIONS=[{key:'q1',day:1,title:'第一題'},{key:'q2',day:1,title:'第二題'},{key:'q3',day:2,title:'第一題'},{key:'q4',day:2,title:'第二題'}] as const;
+export type StationKey=(typeof STATIONS)[number]['key'];
+export type StationDefinition={key:StationKey;day:1|2;title:string;prompt:string};
+export const DEFAULT_STATIONS:StationDefinition[]=STATIONS.map(station=>({...station,prompt:''}));
 export const PASS_SCORE=60;
 export type Grade={score:number|null;rating:number|null};
 export type Student={id:string;workshop_id:string;name:string;email:string;code:string;revision:number;updated_at:string;[key:string]:string|number|null};
-export type Workshop={id:string;name:string;published:number;created_at:string};
+export type Workshop={id:string;name:string;published:number;created_at:string;stations?:StationDefinition[]};
 export type Threshold={key:string;value:number|null;count:number};
 export function gradeStatus(score:number|null){return score===null?'尚未登錄':score>=PASS_SCORE?'及格':'未達及格';}
 export function computeThreshold(grades:Grade[]):{value:number|null;count:number}{
@@ -14,4 +17,12 @@ export function validateGrade(score:unknown,rating:unknown):Grade{
   if(score===null&&rating===null)return {score:null,rating:null};
   if(typeof score!=='number'||!Number.isFinite(score)||score<0||score>100||typeof rating!=='number'||!Number.isInteger(rating)||rating<1||rating>5)throw new Error('每題分數須介於 0–100，Global Rating 須為 1–5 的整數；兩欄請一起填寫或一起留空。');
   return {score,rating};
+}
+export function workshopStations(workshop:Workshop|null|undefined):StationDefinition[]{
+  const configured=workshop?.stations;
+  if(!configured||configured.length!==STATIONS.length)return DEFAULT_STATIONS;
+  return STATIONS.map(station=>{
+    const item=configured.find(value=>value.key===station.key);
+    return item&&item.day===station.day?{...station,title:item.title||station.title,prompt:item.prompt||''}:{...station,prompt:''};
+  });
 }

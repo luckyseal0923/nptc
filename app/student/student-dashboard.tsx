@@ -5,6 +5,8 @@ import {
   STATIONS,
   formatScore,
   gradeStatus,
+  DEFAULT_STATIONS,
+  type StationDefinition,
   type Grade,
   type Threshold,
 } from '@/lib/grading';
@@ -23,6 +25,7 @@ type RecordItem = {
   updatedAt: string | null;
   grades: (Grade & { key: string })[];
   thresholds: Threshold[];
+  stations?: StationDefinition[];
 };
 export default function StudentDashboard({
   isTeacher,
@@ -139,13 +142,15 @@ export default function StudentDashboard({
                   </div>
                   <div className="student-score-grid">
                     {STATIONS.filter((s) => s.day === day).map((s) => {
+                      const station = record.stations?.find((item) => item.key === s.key) ?? DEFAULT_STATIONS.find((item) => item.key === s.key)!;
                       const g = record.grades.find((g) => g.key === s.key),
                         score = g?.score ?? null,
                         t = record.thresholds.find((t) => t.key === s.key);
                       return (
                         <article className="student-score-card" key={s.key}>
                           <div className="panel-heading">
-                            <h3>{s.title}</h3>
+                            <h3>{station.title}</h3>
+                            {station.prompt && <p className="form-help mt-1">{station.prompt}</p>}
                             <span
                               className={`result-badge ${score === null ? 'pending' : score >= 60 ? 'pass' : 'below'}`}
                             >

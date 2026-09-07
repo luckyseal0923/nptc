@@ -1,10 +1,10 @@
-import { computeThreshold, STATIONS } from './grading';
+import { computeThreshold, DEFAULT_STATIONS, STATIONS, type StationDefinition } from './grading';
 
 export const DEMO_MODE = true;
 
 type DemoRole = 'teacher' | 'student';
 type DemoUser = { role: DemoRole; username: string; email: string };
-type Workshop = { id: string; name: string; published: number; created_at: string };
+type Workshop = { id: string; name: string; published: number; created_at: string; stations: StationDefinition[] };
 type Student = Record<string, string | number | null> & {
   id: string;
   workshop_id: string;
@@ -26,7 +26,12 @@ const accounts: Record<DemoRole, DemoUser & { password: string }> = {
 function initialState(): State {
   const now = new Date().toISOString();
   return {
-    workshops: [{ id: 'demo-workshop', name: '示範 OSCE 班', published: 1, created_at: now }],
+    workshops: [{ id: 'demo-workshop', name: '示範 OSCE 班', published: 1, created_at: now, stations: [
+      { ...DEFAULT_STATIONS[0], title: '初步評估與處置', prompt: '依個案主訴完成初步評估、臨床推理與處置說明。' },
+      { ...DEFAULT_STATIONS[1], title: '溝通與衛教', prompt: '以病人可理解的方式說明評估結果與後續處置。' },
+      { ...DEFAULT_STATIONS[2], title: '病況辨識', prompt: '辨識關鍵臨床線索，提出優先處置與追蹤計畫。' },
+      { ...DEFAULT_STATIONS[3], title: '整合照護', prompt: '整合病史、檢查與照護需求，完成臨床決策。' },
+    ] }],
     students: [{
       id: 'demo-student', workshop_id: 'demo-workshop', name: '示範學員', email: accounts.student.email,
       code: 'DEMO001', revision: 0, q1_score: 72, q1_rating: 3, q2_score: 65, q2_rating: 3,
@@ -77,6 +82,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
       const published = workshop.published;
       return {
         id: student.id, name: student.name, code: student.code, workshopName: workshop.name, published,
+        stations: published ? workshop.stations : [],
         updatedAt: published ? student.updated_at : null,
         grades: published ? STATIONS.map(({ key }) => ({ key, score: student[`${key}_score`], rating: student[`${key}_rating`] })) : [],
         thresholds: published ? thresholds(data.students.filter(item => item.workshop_id === workshop.id)) : [],
@@ -91,7 +97,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   const now = new Date().toISOString();
   if (action === 'createWorkshop') {
     const name = String(body.name ?? '').trim(); if (!name) throw new Error('請輸入梯次名稱。');
-    const id = crypto.randomUUID(); data.workshops.unshift({ id, name, published: 0, created_at: now }); save(data); return { id } as T;
+    const id = crypto.randomUUID(); data.workshops.unshift({ id, name, published: 0, created_at: now, stations: structuredClone(DEFAULT_STATIONS) }); save(data); return { id } as T;
   }
   const workshop = data.workshops.find(item => item.id === body.workshopId);
   if (!workshop) throw new Error('找不到此梯次。');
@@ -105,6 +111,33 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   const current = id ? data.students.find(item => item.id === id && item.workshop_id === workshop.id) : undefined;
   if (id && (!current || current.revision !== body.revision)) throw new Error('資料已更新，請重新載入後再編輯。');
   if (action === 'deleteStudent') { data.students = data.students.filter(item => item !== current); save(data); return { ok: true } as T; }
+  if (action === 'saveStations') {
+    const stations = body.stations as StationDefinition[];
+    if (!Array.isArray(stations) || stations.length !== STATIONS.length) throw new Error('請完整填寫四題題目資料。');
+    workshop.stations = STATIONS.map(station => {
+      const input = stations.find(item => item?.key === station.key);
+      const title = String(input?.title ?? '').trim();
+      const prompt = String(input?.prompt ?? '').trim();
+      if (!title) throw new Error('每一題都要填寫題目名稱。');
+      return { ...station, title, prompt };
+    });
+    save(data); return { ok: true } as T;
+  }
+  if (action === 'bulkImportStudents') {
+    const rows = body.students as Array<{ name?: string; email?: string; code?: string }>;
+    if (!Array.isArray(rows) || !rows.length) throw new Error('請至少提供一位學員。');
+    const existing = data.students.filter(item => item.workshop_id === workshop.id);
+    const seenEmails = new Set(existing.map(item => item.email));
+    const seenCodes = new Set(existing.map(item => item.code));
+    const next = rows.map(row => ({ name: String(row.name ?? '').trim(), email: String(row.email ?? '').trim().toLowerCase(), code: String(row.code ?? '').trim() }));
+    for (const row of next) {
+      if (!row.name || !row.email || !row.code || !/^\S+@\S+\.\S+$/.test(row.email)) throw new Error('匯入資料需包含有效的學號、姓名與 Email。');
+      if (seenEmails.has(row.email) || seenCodes.has(row.code)) throw new Error(`學號或 Email 重複：${row.code}／${row.email}`);
+      seenEmails.add(row.email); seenCodes.add(row.code);
+    }
+    data.students.push(...next.map(row => ({ id: crypto.randomUUID(), workshop_id: workshop.id, ...row, revision: 0, q1_score: null, q1_rating: null, q2_score: null, q2_rating: null, q3_score: null, q3_rating: null, q4_score: null, q4_rating: null, updated_at: now, updated_by: teacher.email })));
+    save(data); return { ok: true } as T;
+  }
   if (action === 'saveStudent') {
     const name = String(body.name ?? '').trim(), email = String(body.email ?? '').trim().toLowerCase(), code = String(body.code ?? '').trim();
     if (!name || !email || !code) throw new Error('請完整填寫姓名、Email 與學號。');

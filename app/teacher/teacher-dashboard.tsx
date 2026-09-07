@@ -21,7 +21,9 @@ import {
   STATIONS,
   formatScore,
   validateGrade,
+  workshopStations,
   type Student,
+  type StationDefinition,
   type Workshop,
   type Threshold,
 } from '@/lib/grading';
@@ -38,6 +40,7 @@ export default function TeacherDashboard() {
     [message, setMessage] = useState(''),
     [editing, setEditing] = useState<Student | null>(null),
     [tab, setTab] = useState('roster');
+  const stations = workshopStations(data?.selected);
   async function load(id?: string, signal?: AbortSignal) {
     const result = await rpc<Data>(
       'nptc_teacher_data',
@@ -216,7 +219,7 @@ export default function TeacherDashboard() {
                   {STATIONS.map((s, i) => (
                     <div key={s.key}>
                       <span>
-                        第 {s.day} 天 · {s.title}
+                        第 {s.day} 天 · {stations[i]?.title ?? s.title}
                       </span>
                       <strong>
                         {formatScore(data.thresholds[i]?.value ?? null)}
@@ -267,11 +270,36 @@ export default function TeacherDashboard() {
                   <TabsTrigger value="roster" disabled={busy}>
                     學員名冊
                   </TabsTrigger>
+                  <TabsTrigger value="stations" disabled={busy}>
+                    題目設定
+                  </TabsTrigger>
                   <TabsTrigger value="scores" disabled={busy}>
                     成績登錄
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="roster">
+                  <section className="data-panel mb-6">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>批次匯入學員</h2>
+                        <p className="form-help">從 Excel 複製「學號、姓名、Email」三欄後貼上；第一列欄名可保留。</p>
+                      </div>
+                    </div>
+                    <form onSubmit={async (event) => {
+                      event.preventDefault();
+                      const form = event.currentTarget;
+                      const source = String(new FormData(form).get('rows') ?? '').trim();
+                      const rows = source.split(/\r?\n/).map(line => line.split(/\t|,/).map(value => value.trim())).filter(row => row.some(Boolean));
+                      if (rows[0]?.[0]?.match(/學號|code/i)) rows.shift();
+                      if (!rows.length || rows.some(row => row.length < 3)) { setError('請貼上每列皆含學號、姓名、Email 的資料。'); return; }
+                      if (await save({ action: 'bulkImportStudents', students: rows.map(([code, name, email]) => ({ code, name, email })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
+                    }}>
+                      <fieldset disabled={busy || !!data.selected.published}>
+                        <textarea name="rows" className="mt-3 min-h-28 w-full rounded-md border border-[#b9cdc5] bg-white p-3 text-sm" placeholder={'學號\t姓名\tEmail\nA001\t王小明\tstudent@example.com'} />
+                        <Button className="action mt-3" type="submit">批次匯入名冊</Button>
+                      </fieldset>
+                    </form>
+                  </section>
                   <div className="roster-layout">
                     <section className="data-panel">
                       <div className="panel-heading">
@@ -407,6 +435,39 @@ export default function TeacherDashboard() {
                     </section>
                   </div>
                 </TabsContent>
+                <TabsContent value="stations">
+                  <section className="data-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>四站題目設定</h2>
+                        <p className="form-help">設定第 1、2 天各兩題的題目名稱與命題內容；公布後需先撤回才能修改。</p>
+                      </div>
+                    </div>
+                    <form key={data.selected.id} onSubmit={(event) => {
+                      event.preventDefault();
+                      const form = new FormData(event.currentTarget);
+                      const configured = stations.map((station): StationDefinition => ({
+                        ...station,
+                        title: String(form.get(`${station.key}_title`) ?? ''),
+                        prompt: String(form.get(`${station.key}_prompt`) ?? ''),
+                      }));
+                      save({ action: 'saveStations', stations: configured }, '四站題目設定已儲存。');
+                    }}>
+                      <fieldset disabled={busy || !!data.selected.published}>
+                        <div className="score-input-grid">
+                          {stations.map((station) => (
+                            <div className="score-input-card" key={station.key}>
+                              <h3>第 {station.day} 天</h3>
+                              <label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} /></label>
+                              <label>命題內容<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} maxLength={2000} className="mt-2 min-h-28 w-full rounded-md border border-[#b9cdc5] bg-white p-3 text-sm" placeholder="例如：個案情境、任務與評分重點" /></label>
+                            </div>
+                          ))}
+                        </div>
+                        <Button type="submit" className="action mt-5">儲存題目設定</Button>
+                      </fieldset>
+                    </form>
+                  </section>
+                </TabsContent>
                 <TabsContent value="scores">
                   <section className="data-panel">
                     <div className="panel-heading">
@@ -422,9 +483,9 @@ export default function TeacherDashboard() {
                         <TableHeader>
                           <TableRow>
                             <TableHead>學員</TableHead>
-                            {STATIONS.map((s) => (
+                            {STATIONS.map((s, index) => (
                               <TableHead key={s.key}>
-                                第 {s.day} 天 · {s.title}
+                                第 {s.day} 天 · {stations[index]?.title ?? s.title}
                               </TableHead>
                             ))}
                             <TableHead>操作</TableHead>
@@ -516,10 +577,10 @@ export default function TeacherDashboard() {
                       >
                         <fieldset disabled={busy || !!data.selected.published}>
                           <div className="score-input-grid">
-                            {STATIONS.map((s) => (
+                            {STATIONS.map((s, index) => (
                               <div className="score-input-card" key={s.key}>
                                 <h3>
-                                  第 {s.day} 天 · {s.title}
+                                  第 {s.day} 天 · {stations[index]?.title ?? s.title}
                                 </h3>
                                 <label>
                                   OSCE 分數（0–100）
