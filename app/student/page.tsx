@@ -1,4 +1,6 @@
-import Link from 'next/link';
-import {Activity,ArrowLeft,ArrowRight,LockKeyhole} from 'lucide-react';
-export const metadata={title:'學員專區｜為國考而訓'};
-export default function Student(){return <><header className="header"><Link href="/" className="brand"><span className="brand-symbol"><Activity size={25}/></span><span>為國考而訓<small>NP · OSCE WORKSHOP</small></span></Link><Link className="login-link" href="/"><ArrowLeft size={16}/> 返回首頁</Link></header><main className="portal"><div><div className="section-label">YOUR LEARNING JOURNEY<span>學員專區</span></div><h1>回顧每一次練習，<br/>看見下一步方向。</h1><p>這裡將保存你的工作坊測驗成績，<br/>讓每一次努力，都成為下一次進步的起點。</p></div><section className="portal-panel"><LockKeyhole size={35} strokeWidth={1.3}/><span className="status">準備中</span><h2>個人成績查詢，即將開放。</h2><p>學員登入與成績查詢功能尚未啟用。開放時間及登入方式將另行通知，請留意工作坊的課程訊息。</p><Link className="button" href="/#features">先了解工作坊 <ArrowRight size={18}/></Link><p className="portal-note">此專區未來僅提供本人工作坊測驗成績，供個人學習參考，並非國家考試成績。</p></section></main></>}
+import {identity} from '@/lib/access';
+import {PortalShell,LoginPanel} from '@/components/portal-shell';
+import StudentDashboard from './student-dashboard';
+export const dynamic='force-dynamic';
+export const metadata={title:'我的 OSCE 成績｜為國考而訓',robots:{index:false,follow:false}};
+export default async function StudentPage(){const user=await identity();return <PortalShell email={user?.email}>{user?<StudentDashboard isTeacher={user.isTeacher}/>:<LoginPanel/>}</PortalShell>}
