@@ -2,6 +2,15 @@
 
 前端使用 React + Vite，建置結果為 `dist/`，只包含 HTML、CSS、JavaScript 與圖片。正式服務不需要 Node、Cloudflare Worker 或 D1。
 
+## 目前展示登入
+
+目前先啟用瀏覽器本機展示模式，不需要輸入 Email，也不會寄出驗證信或寫入 Supabase：
+
+- 老師帳號：`teacher`／`demo1234`
+- 學員帳號：`student`／`demo1234`
+
+展示資料只存在使用者目前瀏覽器的 localStorage。要恢復 Supabase 的 Email 驗證登入，將 `lib/demo.ts` 的 `DEMO_MODE` 改為 `false`，再依下列 Supabase 初始化設定完成 SMTP 與 Redirect URL。
+
 ## 啟動與建置
 
 1. `.env.local` 已提供 Supabase API URL 與 anon key。變數名稱見 `.env.example`。這兩個值會在建置時加入前端；不得改放 secret/service_role key。

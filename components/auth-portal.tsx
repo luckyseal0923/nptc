@@ -1,82 +1,33 @@
 import { useEffect, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { supabase, rpc } from '@/lib/supabase';
-import { PortalShell, LoginPanel } from './portal-shell';
-import Link from './link';
 import TeacherDashboard from '@/app/teacher/teacher-dashboard';
 import StudentDashboard from '@/app/student/student-dashboard';
+import Link from '@/components/link';
+import { demoUser } from '@/lib/demo';
+import { LoginPanel, PortalShell } from '@/components/portal-shell';
+
 export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
-  const [session, setSession] = useState<Session | null>(null),
-    [ready, setReady] = useState(false),
-    [role, setRole] = useState<{ uid: string; teacher: boolean } | null>(null),
-    [error, setError] = useState('');
+  const [user, setUser] = useState<ReturnType<typeof demoUser> | undefined>(undefined);
+
   useEffect(() => {
-    let active = true;
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (active) {
-        setSession(data.session);
-        setReady(true);
-        if (error) setError(error.message);
-      }
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, next) => {
-      if (active) {
-        setSession(next);
-        setReady(true);
-      }
-    });
-    return () => {
-      active = false;
-      subscription.unsubscribe();
-    };
+    setUser(demoUser());
   }, []);
-  useEffect(() => {
-    let active = true;
-    setRole(null);
-    setError('');
-    if (session)
-      rpc<boolean>('nptc_is_teacher')
-        .then((value) => {
-          if (active) setRole({ uid: session.user.id, teacher: value });
-        })
-        .catch((e) => {
-          if (active) setError(e.message);
-        });
-    return () => {
-      active = false;
-    };
-  }, [session?.user.id]);
-  const authorized = role?.uid === session?.user.id ? role : null;
+
+  if (user === undefined) return null;
+
   return (
-    <PortalShell email={session?.user.email} teacher={teacher}>
-      {error ? (
-        <section className="notice error" role="alert">
-          <p>{error}</p>
-          <button onClick={() => location.reload()}>重新載入</button>
-        </section>
-      ) : !ready ? (
-        <p role="status">正在確認登入狀態…</p>
-      ) : !session ? (
+    <PortalShell email={user?.username} teacher={teacher}>
+      {!user ? (
         <LoginPanel teacher={teacher} />
-      ) : !authorized ? (
-        <p role="status">正在確認帳號權限…</p>
-      ) : teacher && !authorized.teacher ? (
-        <section className="portal-panel">
-          <h1>此帳號尚未獲得老師權限</h1>
-          <p>請聯絡管理員，或登出後切換至已授權的老師信箱。</p>
-          <Link className="button" href="/student">
-            前往學員專區
-          </Link>
-        </section>
+      ) : teacher && user.role !== 'teacher' ? (
+        <div className="mx-auto max-w-3xl px-6 py-16">
+          <h1 className="text-3xl font-black">此帳號沒有老師權限</h1>
+          <p className="mt-4 text-[#5c7772]">請使用老師展示帳號 teacher／demo1234 登入。</p>
+          <Link href="/student/" className="mt-7 inline-block rounded-md bg-[#174943] px-4 py-2 text-white">前往學員專區</Link>
+        </div>
       ) : teacher ? (
-        <TeacherDashboard key={session.user.id} />
+        <TeacherDashboard />
       ) : (
-        <StudentDashboard
-          key={session.user.id}
-          isTeacher={authorized.teacher}
-        />
+        <StudentDashboard isTeacher={user.role === 'teacher'} />
       )}
     </PortalShell>
   );
