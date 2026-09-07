@@ -75,11 +75,16 @@ begin
   update nptc_private.workshops set published=case when (body->>'published')::boolean then 1 else 0 end where id=w.id;return '{"ok":true}';
  end if;
  if w.published=1 then raise exception '請先撤回公布，再修改名冊或成績。'; end if;
- if action not in ('saveStudent','saveScores') or action is null then raise exception '不支援的操作。'; end if;
+ if action not in ('saveStudent','saveScores','deleteStudent') or action is null then raise exception '不支援的操作。'; end if;
  if body->>'id' is not null then
   if jsonb_typeof(body->'revision') is distinct from 'number' or (body->>'revision') !~ '^[0-9]+$' then raise exception '資料版本不正確。'; end if;
  end if;
- if action='saveStudent' then
+ if action='deleteStudent' then
+  if body->>'id' is null then raise exception '請指定欲刪除的學員。'; end if;
+  delete from nptc_private.students where id=(body->>'id')::uuid and workshop_id=w.id and revision=(body->>'revision')::integer;
+  get diagnostics affected=row_count;
+  if affected=0 then raise exception '資料已更新或已被刪除，請重新載入。'; end if;
+ elsif action='saveStudent' then
   if jsonb_typeof(body->'name') is distinct from 'string' or jsonb_typeof(body->'email') is distinct from 'string' or jsonb_typeof(body->'code') is distinct from 'string' then raise exception '請完整填寫姓名、Email 與學號。'; end if;
   if body->>'id' is null then
    insert into nptc_private.students(workshop_id,name,email,code,updated_by) values(w.id,trim(body->>'name'),lower(trim(body->>'email')),trim(body->>'code'),auth.uid());
