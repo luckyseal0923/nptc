@@ -35,7 +35,7 @@ node node_modules/vite/bin/vite.js preview --host 127.0.0.1
 
 在對應專案的 SQL Editor 執行 `supabase/setup.sql`。老師信箱已設定為 `chin.wei.chang0923@gmail.com`。
 
-若已執行過初版設定，另執行 `supabase/upgrade-workshop-management.sql`，加入四站題目內容與批次名冊匯入的資料結構。
+若已執行過初版設定，依序執行 `supabase/upgrade-workshop-management.sql` 與 `supabase/upgrade-score-feedback.sql`。後者會加入每題的短評欄位與「勾選多位學員後批次儲存成績」功能。
 
 - 啟用 Email 驗證登入與註冊，並設定可寄信的 SMTP。自架 Supabase 的環境設定需在 Zeabur 修改。
 - 將 Site URL 設定為正式前端網址，Redirect URLs 加入正式網址 `/student/` 與 `/teacher/`，本機測試另加入 `http://127.0.0.1:5173/student/` 與 `/teacher/`。

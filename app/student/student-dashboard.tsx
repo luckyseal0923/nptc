@@ -24,7 +24,7 @@ type RecordItem = {
   workshopName: string;
   published: number;
   updatedAt: string | null;
-  grades: (Grade & { key: string })[];
+  grades: (Grade & { key: string; feedback?: string | null })[];
   thresholds: Threshold[];
   stations?: StationDefinition[];
 };
@@ -203,6 +203,12 @@ export default function StudentDashboard({
                               <dd>{g?.rating ?? '—'} / 5</dd>
                             </div>
                           </dl>
+                          {g?.feedback && (
+                            <div className="qualitative-feedback">
+                              <strong>老師回饋</strong>
+                              <p>{g.feedback}</p>
+                            </div>
+                          )}
                           <p className="score-note">
                             {t?.count
                               ? `邊緣分數採 ${t.count} 位 Rating＝3 學員的該題分數平均。`

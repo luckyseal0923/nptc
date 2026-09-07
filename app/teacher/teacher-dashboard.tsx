@@ -19,6 +19,7 @@ export default function TeacherDashboard() {
   const [tab, setTab] = useState('roster');
   const [showCreate, setShowCreate] = useState(false);
   const [scoreStation, setScoreStation] = useState<StationKey>('q1');
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
   const stations = workshopStations(data?.selected);
   const selectedStation = stations.find((station) => station.key === scoreStation) ?? stations[0];
   const selectedThreshold = data?.thresholds.find((item) => item.key === scoreStation);
@@ -46,6 +47,25 @@ export default function TeacherDashboard() {
       setMessage(success);
       return true;
     } catch (cause) { setError((cause as Error).message); return false; } finally { setBusy(false); }
+  }
+  async function saveScoreBatch(form: HTMLFormElement) {
+    const currentData = data;
+    if (!currentData?.selected) return;
+    if (!selectedStudentIds.size) { setError('請至少勾選一位要儲存的學員。'); return; }
+    const fields = new FormData(form);
+    try {
+      const items = currentData.students.filter((student) => selectedStudentIds.has(student.id)).map((student) => ({
+        id: student.id,
+        revision: student.revision,
+        ...validateGrade(fields.get(`${student.id}_score`) === '' ? null : Number(fields.get(`${student.id}_score`)), fields.get(`${student.id}_rating`) === '' ? null : Number(fields.get(`${student.id}_rating`))),
+        feedback: String(fields.get(`${student.id}_feedback`) ?? '').trim(),
+      }));
+      setBusy(true); setError(''); setMessage('');
+      await rpc('nptc_teacher_batch_scores', { body: { workshopId: currentData.selected.id, station: scoreStation, items } });
+      await load(currentData.selected.id);
+      setSelectedStudentIds(new Set());
+      setMessage(`已儲存 ${items.length} 位學員的${selectedStation.title}成績與回饋。`);
+    } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
   }
   async function deleteStudent(student: Student) {
     if (!window.confirm(`確定要刪除學員「${student.name}」嗎？此操作無法復原。`)) return;
@@ -129,19 +149,11 @@ export default function TeacherDashboard() {
         <section className="workflow-intro"><strong>第三步：選擇一站，再登錄該站成績</strong><span>固定及格線為 60 分；邊緣及格線取 Global Rating＝3 的平均。</span></section>
         <div className="station-picker">{stations.map((station) => {
           const threshold = data.thresholds.find((item) => item.key === station.key);
-          return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); }}><span>第 {station.day} 天</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
+          return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}><span>第 {station.day} 天</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
         })}</div>
         <section className="data-panel score-station-panel"><div className="panel-heading"><div><span className="section-label">DAY {selectedStation.day}</span><h2>{selectedStation.title}</h2><p className="form-help">{selectedStation.prompt || '尚未填寫命題內容。'}</p></div><div className="threshold-chip">Rating＝3 平均<br /><strong>{formatScore(selectedThreshold?.value ?? null)} 分</strong></div></div>
-          {data.students.length ? <Table><TableHeader><TableRow><TableHead>學員</TableHead><TableHead>分數</TableHead><TableHead>Global Rating</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}<small className="cell-email">{maskNationalId(student.national_id)}</small></TableCell><TableCell>{formatScore(student[`${scoreStation}_score`] as number | null)}</TableCell><TableCell>{student[`${scoreStation}_rating`] ?? '—'} / 5</TableCell><TableCell><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>登錄本題</Button></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
+          {data.students.length ? <form className="score-batch-form" key={scoreStation} onSubmit={(event) => { event.preventDefault(); saveScoreBatch(event.currentTarget); }}><fieldset disabled={busy || !!data.selected!.published}><Table><TableHeader><TableRow><TableHead>儲存</TableHead><TableHead>學員</TableHead><TableHead>分數</TableHead><TableHead>Global Rating</TableHead><TableHead>質性回饋</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell><input type="checkbox" aria-label={`選取 ${student.name}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); event.target.checked ? next.add(student.id) : next.delete(student.id); return next; })} /></TableCell><TableCell>{student.name}<small className="cell-email">{maskNationalId(student.national_id)}</small></TableCell><TableCell><Input name={`${student.id}_score`} type="number" min={0} max={100} step="any" defaultValue={student[`${scoreStation}_score`] ?? ''} /></TableCell><TableCell><NativeSelect name={`${student.id}_rating`} defaultValue={student[`${scoreStation}_rating`] ?? ''}><NativeSelectOption value="">未評分</NativeSelectOption>{[1, 2, 3, 4, 5].map((number) => <NativeSelectOption key={number} value={number}>{number}</NativeSelectOption>)}</NativeSelect></TableCell><TableCell><textarea name={`${student.id}_feedback`} maxLength={500} defaultValue={student[`${scoreStation}_feedback`] ?? ''} placeholder="簡短回饋（最多 500 字）" /></TableCell></TableRow>)}</TableBody></Table><div className="batch-save-bar"><span>已選取 <strong>{selectedStudentIds.size}</strong> 位學員；只會儲存勾選的資料。</span><Button type="submit" className="action">批次儲存已勾選成績</Button></div></fieldset></form> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
         </section>
-        {editing && <section className="data-panel score-editor"><div className="panel-heading"><div><span className="section-label">SCORE ENTRY</span><h2>{editing.name} · {selectedStation.title}</h2></div><Button className="action secondary" disabled={busy} onClick={() => setEditing(null)}>取消</Button></div><form key={`${editing.id}-${editing.revision}-${scoreStation}`} onSubmit={(event) => {
-          event.preventDefault(); const fields = new FormData(event.currentTarget);
-          try {
-            const currentGrades = Object.fromEntries(STATIONS.map(({ key }) => [key, { score: editing[`${key}_score`] as number | null, rating: editing[`${key}_rating`] as number | null }]));
-            currentGrades[scoreStation] = validateGrade(fields.get('score') === '' ? null : Number(fields.get('score')), fields.get('rating') === '' ? null : Number(fields.get('rating')));
-            save({ action: 'saveScores', id: editing.id, revision: editing.revision, grades: currentGrades }, `${selectedStation.title}成績已儲存。`);
-          } catch (cause) { setError((cause as Error).message); }
-        }}><fieldset disabled={busy || !!data.selected.published}><div className="single-score-form"><label>OSCE 分數（0–100）<Input name="score" type="number" min={0} max={100} step="any" defaultValue={editing[`${scoreStation}_score`] ?? ''} /></label><label>Global Rating（1–5）<NativeSelect name="rating" defaultValue={editing[`${scoreStation}_rating`] ?? ''}><NativeSelectOption value="">尚未評分</NativeSelectOption>{[1, 2, 3, 4, 5].map((number) => <NativeSelectOption key={number} value={number}>{number}{number === 3 ? ' · 納入邊緣分數計算' : ''}</NativeSelectOption>)}</NativeSelect></label><Button type="submit" className="action">儲存本題成績</Button></div></fieldset></form></section>}
       </TabsContent>
 
       <TabsContent value="publish">

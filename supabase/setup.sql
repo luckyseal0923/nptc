@@ -11,7 +11,7 @@ create table if not exists nptc_private.students(
  name text not null check(length(trim(name)) between 1 and 100),
  email text not null check(email=lower(trim(email)) and length(email)<=254 and email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'),
  national_id text not null check(upper(trim(national_id)) ~ '^[A-Z][12][0-9]{8}$'),revision integer not null default 0,
- q1_score numeric,q1_rating integer,q2_score numeric,q2_rating integer,q3_score numeric,q3_rating integer,q4_score numeric,q4_rating integer,
+ q1_score numeric,q1_rating integer,q1_feedback text not null default '' check(length(q1_feedback)<=500),q2_score numeric,q2_rating integer,q2_feedback text not null default '' check(length(q2_feedback)<=500),q3_score numeric,q3_rating integer,q3_feedback text not null default '' check(length(q3_feedback)<=500),q4_score numeric,q4_rating integer,q4_feedback text not null default '' check(length(q4_feedback)<=500),
  updated_at timestamptz not null default now(),updated_by uuid not null,
  unique(workshop_id,email),unique(workshop_id,national_id),
  check((q1_score is null and q1_rating is null) or (q1_score is not null and q1_rating is not null and q1_score between 0 and 100 and q1_rating between 1 and 5)),
@@ -52,8 +52,8 @@ begin
  select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'national_id',s.national_id,'workshopName',w.name,'published',w.published,
  'updatedAt',case when w.published=1 then s.updated_at end,
  'grades',case when w.published=1 then jsonb_build_array(
- jsonb_build_object('key','q1','score',s.q1_score,'rating',s.q1_rating),jsonb_build_object('key','q2','score',s.q2_score,'rating',s.q2_rating),
- jsonb_build_object('key','q3','score',s.q3_score,'rating',s.q3_rating),jsonb_build_object('key','q4','score',s.q4_score,'rating',s.q4_rating)) else '[]'::jsonb end,
+ jsonb_build_object('key','q1','score',s.q1_score,'rating',s.q1_rating,'feedback',s.q1_feedback),jsonb_build_object('key','q2','score',s.q2_score,'rating',s.q2_rating,'feedback',s.q2_feedback),
+ jsonb_build_object('key','q3','score',s.q3_score,'rating',s.q3_rating,'feedback',s.q3_feedback),jsonb_build_object('key','q4','score',s.q4_score,'rating',s.q4_rating,'feedback',s.q4_feedback)) else '[]'::jsonb end,
  'thresholds',case when w.published=1 then nptc_private.thresholds(w.id) else '[]'::jsonb end) order by w.created_at desc,w.id),'[]') into result
  from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id where s.email=lower(auth.jwt()->>'email');
  return jsonb_build_object('records',result);

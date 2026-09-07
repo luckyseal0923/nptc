@@ -34,7 +34,7 @@ function initialState(): State {
     ] }],
     students: [{
       id: 'demo-student', workshop_id: 'demo-workshop', name: '示範學員', email: accounts.student.email,
-      national_id: 'A123456789', revision: 0, q1_score: 72, q1_rating: 3, q2_score: 65, q2_rating: 3,
+      national_id: 'A123456789', revision: 0, q1_score: 72, q1_rating: 3, q1_feedback: '評估方向清楚，可再補充鑑別診斷依據。', q2_score: 65, q2_rating: 3, q2_feedback: '',
       q3_score: 78, q3_rating: 4, q4_score: 58, q4_rating: 2, updated_at: now, updated_by: accounts.teacher.email,
     }],
   };
@@ -92,11 +92,27 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
         id: student.id, name: student.name, national_id: student.national_id, workshopName: workshop.name, published,
         stations: published ? workshop.stations : [],
         updatedAt: published ? student.updated_at : null,
-        grades: published ? STATIONS.map(({ key }) => ({ key, score: student[`${key}_score`], rating: student[`${key}_rating`] })) : [],
+        grades: published ? STATIONS.map(({ key }) => ({ key, score: student[`${key}_score`], rating: student[`${key}_rating`], feedback: student[`${key}_feedback`] })) : [],
         thresholds: published ? thresholds(data.students.filter(item => item.workshop_id === workshop.id)) : [],
       };
     });
     return { records } as T;
+  }
+  if (name === 'nptc_teacher_batch_scores') {
+    const teacher = requireTeacher();
+    const body = args.body as { workshopId?: string; station?: string; items?: Array<{ id: string; revision: number; score: number | null; rating: number | null; feedback: string }> };
+    const workshop = data.workshops.find((item) => item.id === body.workshopId);
+    if (!workshop || workshop.published) throw new Error('請先撤回公布，再修改成績。');
+    if (!STATIONS.some((item) => item.key === body.station) || !body.items?.length) throw new Error('請選擇題目與至少一位學員。');
+    for (const item of body.items) {
+      const student = data.students.find((value) => value.id === item.id && value.workshop_id === workshop.id);
+      if (!student || student.revision !== item.revision) throw new Error('資料已更新，請重新載入後再編輯。');
+      if ((item.score === null) !== (item.rating === null) || (item.score !== null && (!Number.isFinite(item.score) || item.score < 0 || item.score > 100 || !Number.isInteger(item.rating) || item.rating! < 1 || item.rating! > 5))) throw new Error('分數與 Global Rating 請成對填寫，分數為 0–100、Rating 為 1–5。');
+      if (item.feedback.length > 500) throw new Error('質性回饋最多 500 字。');
+      student[`${body.station}_score`] = item.score; student[`${body.station}_rating`] = item.rating; student[`${body.station}_feedback`] = item.feedback;
+      student.revision += 1; student.updated_at = new Date().toISOString(); student.updated_by = teacher.email;
+    }
+    save(data); return { ok: true } as T;
   }
   if (name !== 'nptc_teacher_write') throw new Error('不支援的展示資料操作。');
   const teacher = requireTeacher();
