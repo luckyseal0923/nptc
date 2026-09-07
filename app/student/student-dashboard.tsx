@@ -6,6 +6,7 @@ import {
   formatScore,
   gradeStatus,
   DEFAULT_STATIONS,
+  maskNationalId,
   type StationDefinition,
   type Grade,
   type Threshold,
@@ -19,7 +20,7 @@ import Link from '@/components/link';
 type RecordItem = {
   id: string;
   name: string;
-  code: string;
+  national_id: string;
   workshopName: string;
   published: number;
   updatedAt: string | null;
@@ -105,7 +106,7 @@ export default function StudentDashboard({
                 ))}
               </NativeSelect>
             </label>
-            <span className="identity-pill">學號 {record.code}</span>
+            <span className="identity-pill">身分證字號 {maskNationalId(record.national_id)}</span>
           </div>
           {!record.published ? (
             <section className="empty-panel">

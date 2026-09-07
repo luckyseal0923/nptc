@@ -1,6 +1,13 @@
 -- 在已執行 setup.sql 的專案中執行本檔，加入題目設定與批次匯入功能。
 begin;
 
+-- 舊版欄位 code 改為身分證字號；已升級過時可安全略過。
+do $$ begin
+ if exists(select 1 from information_schema.columns where table_schema='nptc_private' and table_name='students' and column_name='code') then
+  alter table nptc_private.students rename column code to national_id;
+ end if;
+end $$;
+
 alter table nptc_private.workshops
   add column if not exists stations jsonb not null default '[
     {"key":"q1","day":1,"title":"第一題","prompt":""},
@@ -15,7 +22,7 @@ declare result jsonb;
 begin
  if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
  select coalesce(jsonb_agg(jsonb_build_object(
-  'id',s.id,'name',s.name,'code',s.code,'workshopName',w.name,'published',w.published,
+  'id',s.id,'name',s.name,'national_id',s.national_id,'workshopName',w.name,'published',w.published,
   'stations',case when w.published=1 then w.stations else '[]'::jsonb end,
   'updatedAt',case when w.published=1 then s.updated_at end,
   'grades',case when w.published=1 then jsonb_build_array(
@@ -28,7 +35,7 @@ begin
  return jsonb_build_object('records',result);
 end;$$;
 
--- 批次匯入時傳入 [{"code":"A001","name":"王小明","email":"student@example.com"}]。
+-- 批次匯入時傳入 [{"name":"王小明","national_id":"A123456789","email":"student@example.com"}]。
 create or replace function public.nptc_teacher_write(body jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
 declare action text:=body->>'action'; w nptc_private.workshops; sid uuid; affected integer; station text; g jsonb; score numeric; rating numeric; row_item jsonb;
 begin
@@ -59,9 +66,9 @@ begin
  if action='bulkImportStudents' then
   if jsonb_typeof(body->'students') is distinct from 'array' or jsonb_array_length(body->'students')=0 then raise exception '請至少提供一位學員。'; end if;
   for row_item in select value from jsonb_array_elements(body->'students') loop
-   if jsonb_typeof(row_item->'name') is distinct from 'string' or jsonb_typeof(row_item->'email') is distinct from 'string' or jsonb_typeof(row_item->'code') is distinct from 'string' then raise exception '匯入資料需包含學號、姓名與 Email。'; end if;
-   insert into nptc_private.students(workshop_id,name,email,code,updated_by)
-     values(w.id,trim(row_item->>'name'),lower(trim(row_item->>'email')),trim(row_item->>'code'),auth.uid());
+   if jsonb_typeof(row_item->'name') is distinct from 'string' or jsonb_typeof(row_item->'email') is distinct from 'string' or jsonb_typeof(row_item->'national_id') is distinct from 'string' then raise exception '匯入資料需包含身分證字號、姓名與 Email。'; end if;
+   insert into nptc_private.students(workshop_id,name,email,national_id,updated_by)
+     values(w.id,trim(row_item->>'name'),lower(trim(row_item->>'email')),trim(row_item->>'national_id'),auth.uid());
   end loop;
   return '{"ok":true}';
  end if;
@@ -75,11 +82,11 @@ begin
   get diagnostics affected=row_count;
   if affected=0 then raise exception '資料已更新或已被刪除，請重新載入。'; end if;
  elsif action='saveStudent' then
-  if jsonb_typeof(body->'name') is distinct from 'string' or jsonb_typeof(body->'email') is distinct from 'string' or jsonb_typeof(body->'code') is distinct from 'string' then raise exception '請完整填寫姓名、Email 與學號。'; end if;
+  if jsonb_typeof(body->'name') is distinct from 'string' or jsonb_typeof(body->'email') is distinct from 'string' or jsonb_typeof(body->'national_id') is distinct from 'string' then raise exception '請完整填寫姓名、Email 與身分證字號。'; end if;
   if body->>'id' is null then
-   insert into nptc_private.students(workshop_id,name,email,code,updated_by) values(w.id,trim(body->>'name'),lower(trim(body->>'email')),trim(body->>'code'),auth.uid());
+   insert into nptc_private.students(workshop_id,name,email,national_id,updated_by) values(w.id,trim(body->>'name'),lower(trim(body->>'email')),trim(body->>'national_id'),auth.uid());
   else
-   update nptc_private.students set name=trim(body->>'name'),email=lower(trim(body->>'email')),code=trim(body->>'code'),revision=revision+1,updated_at=now(),updated_by=auth.uid()
+   update nptc_private.students set name=trim(body->>'name'),email=lower(trim(body->>'email')),national_id=trim(body->>'national_id'),revision=revision+1,updated_at=now(),updated_by=auth.uid()
    where id=(body->>'id')::uuid and workshop_id=w.id and revision=(body->>'revision')::integer;
    get diagnostics affected=row_count;
    if affected=0 then raise exception '資料已更新，請重新載入後再編輯。'; end if;
@@ -105,8 +112,8 @@ begin
   if affected=0 then raise exception '資料已更新，請重新載入後再編輯。'; end if;
  end if;
  return '{"ok":true}';
-exception when unique_violation then raise exception '此梯次已有相同的學號或 Email。';
- when check_violation or not_null_violation then raise exception '欄位格式或範圍不正確，請確認姓名、Email、學號與成績。';
+exception when unique_violation then raise exception '此梯次已有相同的身分證字號或 Email。';
+ when check_violation or not_null_violation then raise exception '欄位格式或範圍不正確，請確認姓名、Email、身分證字號與成績。';
 end;$$;
 
 revoke all on function public.nptc_student_data() from public,anon;

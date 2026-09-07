@@ -10,7 +10,7 @@ type Student = Record<string, string | number | null> & {
   workshop_id: string;
   name: string;
   email: string;
-  code: string;
+  national_id: string;
   revision: number;
   updated_at: string;
 };
@@ -34,14 +34,22 @@ function initialState(): State {
     ] }],
     students: [{
       id: 'demo-student', workshop_id: 'demo-workshop', name: '示範學員', email: accounts.student.email,
-      code: 'DEMO001', revision: 0, q1_score: 72, q1_rating: 3, q2_score: 65, q2_rating: 3,
+      national_id: 'A123456789', revision: 0, q1_score: 72, q1_rating: 3, q2_score: 65, q2_rating: 3,
       q3_score: 78, q3_rating: 4, q4_score: 58, q4_rating: 2, updated_at: now, updated_by: accounts.teacher.email,
     }],
   };
 }
 
 function state(): State {
-  try { const saved = localStorage.getItem(storageKey); return saved ? JSON.parse(saved) as State : initialState(); } catch { return initialState(); }
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (!saved) return initialState();
+    const parsed = JSON.parse(saved) as State & { students: Array<Student & { code?: string }> };
+    parsed.students.forEach((student) => {
+      if (!student.national_id) student.national_id = student.code === 'DEMO001' ? 'A123456789' : '';
+    });
+    return parsed;
+  } catch { return initialState(); }
 }
 function save(next: State) { localStorage.setItem(storageKey, JSON.stringify(next)); }
 function thresholds(students: Student[]) {
@@ -73,7 +81,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     requireTeacher();
     const requested = args.requested_workshop as string | null | undefined;
     const selected = data.workshops.find(item => item.id === requested) ?? data.workshops[0] ?? null;
-    const students = selected ? data.students.filter(item => item.workshop_id === selected.id).sort((a, b) => a.code.localeCompare(b.code)) : [];
+    const students = selected ? data.students.filter(item => item.workshop_id === selected.id).sort((a, b) => a.name.localeCompare(b.name, 'zh-TW')) : [];
     return { workshops: data.workshops, selected, students, thresholds: selected ? thresholds(students) : [] } as T;
   }
   if (name === 'nptc_student_data') {
@@ -81,7 +89,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
       const workshop = data.workshops.find(item => item.id === student.workshop_id)!;
       const published = workshop.published;
       return {
-        id: student.id, name: student.name, code: student.code, workshopName: workshop.name, published,
+        id: student.id, name: student.name, national_id: student.national_id, workshopName: workshop.name, published,
         stations: published ? workshop.stations : [],
         updatedAt: published ? student.updated_at : null,
         grades: published ? STATIONS.map(({ key }) => ({ key, score: student[`${key}_score`], rating: student[`${key}_rating`] })) : [],
@@ -124,26 +132,26 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     save(data); return { ok: true } as T;
   }
   if (action === 'bulkImportStudents') {
-    const rows = body.students as Array<{ name?: string; email?: string; code?: string }>;
+    const rows = body.students as Array<{ name?: string; email?: string; national_id?: string }>;
     if (!Array.isArray(rows) || !rows.length) throw new Error('請至少提供一位學員。');
     const existing = data.students.filter(item => item.workshop_id === workshop.id);
     const seenEmails = new Set(existing.map(item => item.email));
-    const seenCodes = new Set(existing.map(item => item.code));
-    const next = rows.map(row => ({ name: String(row.name ?? '').trim(), email: String(row.email ?? '').trim().toLowerCase(), code: String(row.code ?? '').trim() }));
+    const seenIds = new Set(existing.map(item => item.national_id));
+    const next = rows.map(row => ({ name: String(row.name ?? '').trim(), email: String(row.email ?? '').trim().toLowerCase(), national_id: String(row.national_id ?? '').trim().toUpperCase() }));
     for (const row of next) {
-      if (!row.name || !row.email || !row.code || !/^\S+@\S+\.\S+$/.test(row.email)) throw new Error('匯入資料需包含有效的學號、姓名與 Email。');
-      if (seenEmails.has(row.email) || seenCodes.has(row.code)) throw new Error(`學號或 Email 重複：${row.code}／${row.email}`);
-      seenEmails.add(row.email); seenCodes.add(row.code);
+      if (!row.name || !row.email || !/^[A-Z][12]\d{8}$/.test(row.national_id) || !/^\S+@\S+\.\S+$/.test(row.email)) throw new Error('匯入資料需包含有效的姓名、身分證字號與 Email。');
+      if (seenEmails.has(row.email) || seenIds.has(row.national_id)) throw new Error(`身分證字號或 Email 重複：${row.email}`);
+      seenEmails.add(row.email); seenIds.add(row.national_id);
     }
     data.students.push(...next.map(row => ({ id: crypto.randomUUID(), workshop_id: workshop.id, ...row, revision: 0, q1_score: null, q1_rating: null, q2_score: null, q2_rating: null, q3_score: null, q3_rating: null, q4_score: null, q4_rating: null, updated_at: now, updated_by: teacher.email })));
     save(data); return { ok: true } as T;
   }
   if (action === 'saveStudent') {
-    const name = String(body.name ?? '').trim(), email = String(body.email ?? '').trim().toLowerCase(), code = String(body.code ?? '').trim();
-    if (!name || !email || !code) throw new Error('請完整填寫姓名、Email 與學號。');
-    if (data.students.some(item => item !== current && item.workshop_id === workshop.id && (item.email === email || item.code === code))) throw new Error('此梯次已有相同的學號或 Email。');
-    if (current) { Object.assign(current, { name, email, code, revision: current.revision + 1, updated_at: now, updated_by: teacher.email }); }
-    else data.students.push({ id: crypto.randomUUID(), workshop_id: workshop.id, name, email, code, revision: 0, q1_score: null, q1_rating: null, q2_score: null, q2_rating: null, q3_score: null, q3_rating: null, q4_score: null, q4_rating: null, updated_at: now, updated_by: teacher.email });
+    const name = String(body.name ?? '').trim(), email = String(body.email ?? '').trim().toLowerCase(), national_id = String(body.national_id ?? '').trim().toUpperCase();
+    if (!name || !email || !/^[A-Z][12]\d{8}$/.test(national_id)) throw new Error('請完整填寫有效的姓名、身分證字號與 Email。');
+    if (data.students.some(item => item !== current && item.workshop_id === workshop.id && (item.email === email || item.national_id === national_id))) throw new Error('此梯次已有相同的身分證字號或 Email。');
+    if (current) { Object.assign(current, { name, email, national_id, revision: current.revision + 1, updated_at: now, updated_by: teacher.email }); }
+    else data.students.push({ id: crypto.randomUUID(), workshop_id: workshop.id, name, email, national_id, revision: 0, q1_score: null, q1_rating: null, q2_score: null, q2_rating: null, q3_score: null, q3_rating: null, q4_score: null, q4_rating: null, updated_at: now, updated_by: teacher.email });
     save(data); return { ok: true } as T;
   }
   if (action === 'saveScores' && current) {

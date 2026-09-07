@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { STATIONS, formatScore, validateGrade, workshopStations, type Student, type StationDefinition, type StationKey, type Workshop, type Threshold } from '@/lib/grading';
+import { STATIONS, formatScore, maskNationalId, validateGrade, workshopStations, type Student, type StationDefinition, type StationKey, type Workshop, type Threshold } from '@/lib/grading';
 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
 
@@ -48,7 +48,7 @@ export default function TeacherDashboard() {
     } catch (cause) { setError((cause as Error).message); return false; } finally { setBusy(false); }
   }
   async function deleteStudent(student: Student) {
-    if (!window.confirm(`確定要刪除學員「${student.name}（${student.code}）」嗎？此操作無法復原。`)) return;
+    if (!window.confirm(`確定要刪除學員「${student.name}」嗎？此操作無法復原。`)) return;
     await save({ action: 'deleteStudent', id: student.id, revision: student.revision }, `學員「${student.name}」已刪除。`);
   }
   function changeTab(next: string) {
@@ -94,24 +94,24 @@ export default function TeacherDashboard() {
       <TabsContent value="roster">
         <section className="workflow-intro"><strong>第一步：建立本梯次名冊</strong><span>可逐筆新增，或直接從 Excel 貼上三欄資料。</span></section>
         <section className="data-panel import-panel">
-          <div className="panel-heading"><div><h2>批次匯入學員</h2><p className="form-help">欄位順序：學號、姓名、Email。第一列欄名可保留。</p></div></div>
+          <div className="panel-heading"><div><h2>批次匯入學員</h2><p className="form-help">欄位順序：姓名、身分證字號、Email。第一列欄名可保留。</p></div></div>
           <form onSubmit={async (event) => {
             event.preventDefault(); const form = event.currentTarget; const source = String(new FormData(form).get('rows') ?? '').trim();
             const rows = source.split(/\r?\n/).map((line) => line.split(/\t|,/).map((value) => value.trim())).filter((row) => row.some(Boolean));
-            if (rows[0]?.[0]?.match(/學號|code/i)) rows.shift();
-            if (!rows.length || rows.some((row) => row.length < 3)) { setError('請貼上每列皆含學號、姓名、Email 的資料。'); return; }
-            if (await save({ action: 'bulkImportStudents', students: rows.map(([code, name, email]) => ({ code, name, email })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
-          }}><fieldset disabled={busy || !!data.selected.published}><textarea name="rows" placeholder={'學號\t姓名\tEmail\nA001\t王小明\tstudent@example.com'} /><Button className="action" type="submit">批次匯入名冊</Button></fieldset></form>
+            if (rows[0]?.[0]?.match(/姓名|name/i)) rows.shift();
+            if (!rows.length || rows.some((row) => row.length < 3)) { setError('請貼上每列皆含姓名、身分證字號、Email 的資料。'); return; }
+            if (await save({ action: 'bulkImportStudents', students: rows.map(([name, national_id, email]) => ({ name, national_id, email })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
+          }}><fieldset disabled={busy || !!data.selected.published}><textarea name="rows" placeholder={'姓名\t身分證字號\tEmail\n王小明\tA123456789\tstudent@example.com'} /><Button className="action" type="submit">批次匯入名冊</Button></fieldset></form>
         </section>
         <div className="roster-layout">
           <section className="data-panel"><div className="panel-heading"><h2>學員名冊</h2><span>{data.students.length} 位學員</span></div>
-            {data.students.length ? <Table><TableHeader><TableRow><TableHead>學號</TableHead><TableHead>姓名 / 登入 Email</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.code}</TableCell><TableCell>{student.name}<small className="cell-email">{student.email}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請新增第一位學員。</p>}
+            {data.students.length ? <Table><TableHeader><TableRow><TableHead>姓名 / 身分證字號</TableHead><TableHead>登入 Email</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}<small className="cell-email">{maskNationalId(student.national_id)}</small></TableCell><TableCell>{student.email}</TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請新增第一位學員。</p>}
           </section>
           <section className="data-panel"><h2>{editing ? '編輯學員' : '新增學員'}</h2><p className="form-help">此 Email 將作為學員正式登入帳號。</p>
             <form key={editing?.id ?? 'new'} className="entry-form" onSubmit={async (event) => {
               event.preventDefault(); const form = event.currentTarget; const fields = new FormData(form);
-              if (await save({ action: 'saveStudent', id: editing?.id, revision: editing?.revision, name: fields.get('name'), code: fields.get('code'), email: fields.get('email') }, '學員資料已儲存。')) form.reset();
-            }}><fieldset disabled={busy || !!data.selected.published}><label>學號<Input name="code" defaultValue={editing?.code ?? ''} required maxLength={40} /></label><label>姓名<Input name="name" defaultValue={editing?.name ?? ''} required maxLength={100} /></label><label>登入 Email<Input name="email" type="email" defaultValue={editing?.email ?? ''} required maxLength={254} /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button>{editing && <Button className="action secondary" type="button" onClick={() => setEditing(null)}>取消</Button>}</div></fieldset></form>
+              if (await save({ action: 'saveStudent', id: editing?.id, revision: editing?.revision, name: fields.get('name'), national_id: fields.get('national_id'), email: fields.get('email') }, '學員資料已儲存。')) form.reset();
+            }}><fieldset disabled={busy || !!data.selected.published}><label>姓名<Input name="name" defaultValue={editing?.name ?? ''} required maxLength={100} /></label><label>身分證字號<Input name="national_id" defaultValue={editing?.national_id ?? ''} required minLength={10} maxLength={10} pattern="[A-Za-z][12][0-9]{8}" /></label><label>登入 Email<Input name="email" type="email" defaultValue={editing?.email ?? ''} required maxLength={254} /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button>{editing && <Button className="action secondary" type="button" onClick={() => setEditing(null)}>取消</Button>}</div></fieldset></form>
           </section>
         </div>
       </TabsContent>
@@ -132,7 +132,7 @@ export default function TeacherDashboard() {
           return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); }}><span>第 {station.day} 天</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
         })}</div>
         <section className="data-panel score-station-panel"><div className="panel-heading"><div><span className="section-label">DAY {selectedStation.day}</span><h2>{selectedStation.title}</h2><p className="form-help">{selectedStation.prompt || '尚未填寫命題內容。'}</p></div><div className="threshold-chip">Rating＝3 平均<br /><strong>{formatScore(selectedThreshold?.value ?? null)} 分</strong></div></div>
-          {data.students.length ? <Table><TableHeader><TableRow><TableHead>學員</TableHead><TableHead>分數</TableHead><TableHead>Global Rating</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}<small className="cell-email">{student.code}</small></TableCell><TableCell>{formatScore(student[`${scoreStation}_score`] as number | null)}</TableCell><TableCell>{student[`${scoreStation}_rating`] ?? '—'} / 5</TableCell><TableCell><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>登錄本題</Button></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
+          {data.students.length ? <Table><TableHeader><TableRow><TableHead>學員</TableHead><TableHead>分數</TableHead><TableHead>Global Rating</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}<small className="cell-email">{maskNationalId(student.national_id)}</small></TableCell><TableCell>{formatScore(student[`${scoreStation}_score`] as number | null)}</TableCell><TableCell>{student[`${scoreStation}_rating`] ?? '—'} / 5</TableCell><TableCell><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>登錄本題</Button></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
         </section>
         {editing && <section className="data-panel score-editor"><div className="panel-heading"><div><span className="section-label">SCORE ENTRY</span><h2>{editing.name} · {selectedStation.title}</h2></div><Button className="action secondary" disabled={busy} onClick={() => setEditing(null)}>取消</Button></div><form key={`${editing.id}-${editing.revision}-${scoreStation}`} onSubmit={(event) => {
           event.preventDefault(); const fields = new FormData(event.currentTarget);
