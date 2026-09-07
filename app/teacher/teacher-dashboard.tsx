@@ -83,7 +83,7 @@ export default function TeacherDashboard() {
       <Button className="action" type="submit" disabled={busy}>建立梯次</Button>
     </form>}
 
-    <Tabs value={tab} onValueChange={(value) => changeTab(String(value))}>
+    <Tabs className="teacher-workflow-tabs" value={tab} onValueChange={(value) => changeTab(String(value))}>
       <TabsList className="dashboard-tabs teacher-tabs">
         <TabsTrigger value="roster" disabled={busy}>1　學員名冊</TabsTrigger>
         <TabsTrigger value="stations" disabled={busy}>2　題目設定</TabsTrigger>
