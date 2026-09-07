@@ -1,0 +1,48 @@
+-- 正式庫可執行：只建立交易內的虛擬資料，結尾 rollback，不留下測試名冊。
+begin;
+do $$
+declare w uuid; s uuid; result jsonb; payload jsonb; failed boolean;
+begin
+ if has_function_privilege('anon','public.nptc_student_data()','execute') then raise exception 'FAIL anonymous RPC access'; end if;
+ if has_table_privilege('authenticated','nptc_private.students','select') then raise exception 'FAIL direct table access'; end if;
+ perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000001","email":"chin.wei.chang0923@gmail.com","role":"authenticated"}',true);
+ if not public.nptc_is_teacher() then raise exception 'FAIL teacher role'; end if;
+ w=(public.nptc_teacher_write('{"action":"createWorkshop","name":"TRANSACTION-ONLY-TEST"}')->>'id')::uuid;
+ failed=false;
+ begin perform public.nptc_teacher_write(jsonb_build_object('action','publish','workshopId',w,'published',true));exception when others then failed=true;end;
+ if not failed then raise exception 'FAIL empty publication allowed'; end if;
+ perform public.nptc_teacher_write(jsonb_build_object('action','saveStudent','workshopId',w,'name','Test A','email','nptc-test-a@example.invalid','code','A'));
+ perform public.nptc_teacher_write(jsonb_build_object('action','saveStudent','workshopId',w,'name','Test B','email','nptc-test-b@example.invalid','code','B'));
+ result=public.nptc_teacher_data(w);
+ if jsonb_array_length(result->'students')<>2 then raise exception 'FAIL roster'; end if;
+ s=(result#>>'{students,0,id}')::uuid;
+ payload=jsonb_build_object('action','saveScores','workshopId',w,'id',s,'revision',0,'grades','{"q1":{"score":0,"rating":3},"q2":{"score":60,"rating":3},"q3":{"score":null,"rating":null},"q4":{"score":100,"rating":5}}'::jsonb);
+ perform public.nptc_teacher_write(payload);
+ failed=false;begin perform public.nptc_teacher_write(payload);exception when others then failed=true;end;
+ if not failed then raise exception 'FAIL stale revision allowed'; end if;
+ failed=false;begin perform public.nptc_teacher_write(jsonb_set(jsonb_set(payload,'{revision}','1'),'{grades,q1,rating}','3.5'));exception when others then failed=true;end;
+ if not failed then raise exception 'FAIL fractional rating'; end if;
+ failed=false;begin perform public.nptc_teacher_write(jsonb_set(jsonb_set(payload,'{revision}','1'),'{grades,q1,score}','null'));exception when others then failed=true;end;
+ if not failed then raise exception 'FAIL unpaired grade'; end if;
+ result=public.nptc_teacher_data(w);
+ if (result#>>'{thresholds,0,value}')::numeric<>0 or (result#>>'{thresholds,0,count}')::integer<>1 or result#>'{thresholds,2,value}'<>'null'::jsonb then raise exception 'FAIL borderline calculation'; end if;
+ perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000002","email":"nptc-test-a@example.invalid","role":"authenticated"}',true);
+ if public.nptc_is_teacher() then raise exception 'FAIL student teacher role'; end if;
+ result=public.nptc_student_data();
+ if jsonb_array_length(result->'records')<>1 or result#>'{records,0,grades}'<>'[]'::jsonb or result#>'{records,0,thresholds}'<>'[]'::jsonb then raise exception 'FAIL unpublished isolation'; end if;
+ failed=false;begin perform public.nptc_teacher_data(w);exception when insufficient_privilege then failed=true;end;
+ if not failed then raise exception 'FAIL student teacher read'; end if;
+ failed=false;begin perform public.nptc_teacher_write(payload);exception when insufficient_privilege then failed=true;end;
+ if not failed then raise exception 'FAIL student teacher write'; end if;
+ perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000001","email":"chin.wei.chang0923@gmail.com","role":"authenticated"}',true);
+ perform public.nptc_teacher_write(jsonb_build_object('action','publish','workshopId',w,'published',true));
+ failed=false;begin perform public.nptc_teacher_write(jsonb_set(payload,'{revision}','1'));exception when others then failed=true;end;
+ if not failed then raise exception 'FAIL published write allowed'; end if;
+ perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000002","email":"nptc-test-a@example.invalid","role":"authenticated"}',true);
+ result=public.nptc_student_data();
+ if jsonb_array_length(result->'records')<>1 or (result#>>'{records,0,grades,0,score}')::numeric<>0 or (result#>>'{records,0,published}')::integer<>1 then raise exception 'FAIL published own results'; end if;
+ perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000003","email":"stranger@example.invalid","role":"authenticated"}',true);
+ if public.nptc_student_data()->'records'<>'[]'::jsonb then raise exception 'FAIL stranger isolation'; end if;
+end;$$;
+select 'PASS: permissions, roster, scores, revisions, publication, privacy, thresholds' as result;
+rollback;

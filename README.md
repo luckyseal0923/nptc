@@ -1,26 +1,53 @@
-# 為國考而訓 — 學員與老師專區
+# 為國考而訓：靜態前端 + Supabase
 
-首頁不含課程議程。學員與老師使用 Sites 的 ChatGPT 登入，權限在伺服器端檢查。
+前端使用 React + Vite，建置結果為 `dist/`，只包含 HTML、CSS、JavaScript 與圖片。正式服務不需要 Node、Cloudflare Worker 或 D1。
 
-- `/student`：依登入 Email 取得本人名冊，只讀取已公布的四題成績。
-- `/teacher`：僅 `TEACHER_EMAILS` 指定帳號能建立梯次、新增或修改學員、儲存四題成績、公布／撤回成績。
-- 同一梯次不得重複學號或 Email。不同梯次的計算互不混用。
-- 每題 0–100 分，Global Rating 1–5 整數；成績及 Rating 成對儲存。
-- 固定及格線 60 分；邊緣及格分數＝同梯次、同題 Rating＝3 的有效分數平均，無資料時為 null。
-- 成績狀態依原始分數與 60 比較，顯示數值最多四捨五入至小數點後兩位。
-- 公布後鎖定編輯；先撤回再修改。更新以 revision 避免覆蓋他人較新的資料。
+## 啟動與建置
 
-## 本機
+1. `.env.local` 已提供 Supabase API URL 與 anon key。變數名稱見 `.env.example`。這兩個值會在建置時加入前端；不得改放 secret/service_role key。
+2. 安裝：`pnpm install`
+3. 開發：`pnpm dev`
+4. 建置：`pnpm build`
+5. 預覽：`pnpm start`
 
-依 `.env.example` 設定 `.env` 及忽略追蹤的 `.dev.vars`。Sites 在本機模擬登入帳號為 `seedy@sites.test`；只可在 `.dev.vars` 加入此帳號測試老師流程，正式環境不可加入。
+若本機 pnpm 包裝器要求重新安裝，可直接執行已安裝套件：
 
-以 pnpm 安裝套件並啟動 `dev`。遷移由 `drizzle-kit generate` 產生，以 `wrangler d1 migrations apply DB --local --config wrangler.local.jsonc` 套用本機資料庫。正式資料庫由 Sites 發布時套用遷移。
+```powershell
+node node_modules/vite/bin/vite.js build
+node scripts/static-routes.mjs
+node node_modules/vite/bin/vite.js preview --host 127.0.0.1
+```
 
-## 驗證
+首頁 `/`、老師 `/teacher/`、學員 `/student/` 都有靜態 HTML 入口，適合掛在網域根目錄。若部署至子目錄，需另調整連結與資產基底路徑。
 
-- `node --test tests/grading.test.mjs`
-- `node tests/api-flow.mjs`（需要本機 localhost:3000、資料表及本機模擬老師權限）
-- API 測試只在本機建立 LOCAL-TEST 梯次，清理 SQL 位於 `work/test-cleanup.sql`，透過本機 wrangler 執行。
-- `tsc --noEmit` 與 `vinext build`
+## Supabase 初始化
 
-正式授權由 Sites 環境變數保存，不放入前端或 Git。正式庫不包含測試學員。
+在對應專案的 SQL Editor 執行 `supabase/setup.sql`。老師信箱已設定為 `chin.wei.chang0923@gmail.com`。
+
+- 啟用 Email 驗證登入與註冊，並設定可寄信的 SMTP。自架 Supabase 的環境設定需在 Zeabur 修改。
+- 將 Site URL 設定為正式前端網址，Redirect URLs 加入正式網址 `/student/` 與 `/teacher/`，本機測試另加入 `http://127.0.0.1:5173/student/` 與 `/teacher/`。
+- 驗證信可使用登入連結；若希望輸入驗證碼，Email 模板必須包含 `{{ .Token }}`。
+- 勿關閉 Email 驗證；權限依 Supabase 簽署的登入 Email 判斷。
+
+## 權限與資料
+
+資料保存在 `nptc_private` schema。資料表啟用 RLS 並撤銷 anon/authenticated 的直接存取，只開放四個 public RPC。函式固定 search_path，並逐次檢查登入身分與老師名單。
+
+- `nptc_is_teacher()`：查詢目前帳號的老師權限。
+- `nptc_teacher_data(requested_workshop)`：老師取得梯次、名冊及邊緣及格分數。
+- `nptc_teacher_write(body)`：老師建立梯次、儲存學員與成績、公布及撤回。
+- `nptc_student_data()`：學員只取得本人資料，未公布時不回傳分數或邊緣及格分數。
+
+每題分數 0–100，Rating 為 1–5 整數；兩欄成對填寫或留空。固定及格線 60 分。邊緣及格分數為該梯次 Rating=3 的平均。公布後禁止修改，撤回後才能編輯；revision 防止覆寫新版資料，梯次鎖防止公布與修改互相競爭。
+
+舊版程式與 SQLite 結構保存在 `legacy-d1/`，不參與編譯與部署。舊 D1 資料不會自動搬入 Supabase；本次不刪除舊資料庫。若舊庫有正式名冊，需要另外匯出及匯入。
+
+## 檢查
+
+```powershell
+node --test tests/grading.test.mjs
+node node_modules/typescript/bin/tsc --noEmit
+node scripts/check-supabase.mjs
+```
+
+連線檢查只輸出 HTTP 狀態，不顯示金鑰。未登入呼叫已安裝的 RPC 應被拒絕。
