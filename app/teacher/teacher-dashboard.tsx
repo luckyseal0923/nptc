@@ -20,6 +20,7 @@ export default function TeacherDashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [scoreStation, setScoreStation] = useState<StationKey>('q1');
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [openedStationKeys, setOpenedStationKeys] = useState<Set<StationKey>>(new Set());
   const stations = workshopStations(data?.selected);
   const selectedStation = stations.find((station) => station.key === scoreStation) ?? stations[0];
   const selectedThreshold = data?.thresholds.find((item) => item.key === scoreStation);
@@ -135,12 +136,16 @@ export default function TeacherDashboard() {
       </TabsContent>
 
       <TabsContent value="stations">
-        <section className="workflow-intro"><strong>第二步：設定四個 OSCE 站點</strong><span>每題填寫名稱與命題內容，供老師評分與學員回顧。</span></section>
+        <section className="workflow-intro"><strong>第二步：設定四個 OSCE 題目</strong><span>點選「新增題目」後輸入題目名稱與命題內容。</span></section>
         <section className="data-panel"><form key={data.selected.id} onSubmit={(event) => {
           event.preventDefault(); const fields = new FormData(event.currentTarget);
-          const configured = stations.map((station): StationDefinition => ({ ...station, title: String(fields.get(`${station.key}_title`) ?? ''), prompt: String(fields.get(`${station.key}_prompt`) ?? '') }));
+          const configured = stations.map((station): StationDefinition => ({ ...station, title: String(fields.get(`${station.key}_title`) ?? station.title), prompt: String(fields.get(`${station.key}_prompt`) ?? station.prompt) }));
           save({ action: 'saveStations', stations: configured }, '四站題目設定已儲存。');
-        }}><fieldset disabled={busy || !!data.selected.published}><div className="station-settings-grid">{stations.map((station) => <article className="station-setting" key={station.key}><span>第 {station.day} 天</span><label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} /></label><label>命題內容<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} maxLength={2000} placeholder="例如：個案情境、任務與評分重點" /></label></article>)}</div><Button type="submit" className="action">儲存題目設定</Button></fieldset></form></section>
+        }}><fieldset disabled={busy || !!data.selected.published}><div className="station-settings-grid station-settings-all">{stations.map((station) => {
+          const isConfigured = openedStationKeys.has(station.key) || station.title !== (station.key === 'q1' || station.key === 'q3' ? '第一題' : '第二題') || Boolean(station.prompt);
+          const questionNumber = stations.findIndex((item) => item.key === station.key) + 1;
+          return isConfigured ? <article className="station-setting" key={station.key}><span>OSCE 第 {questionNumber} 題</span><label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /></label><label>命題內容<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} maxLength={2000} placeholder="例如：個案情境、任務與評分重點" /></label></article> : <button className="add-station-card" key={station.key} type="button" onClick={() => setOpenedStationKeys((current) => new Set(current).add(station.key))}><span>OSCE 第 {questionNumber} 題</span><strong>＋ 新增題目</strong><small>新增後填寫題目名稱與命題內容</small></button>;
+        })}</div><Button type="submit" className="action">儲存題目設定</Button></fieldset></form></section>
       </TabsContent>
 
       <TabsContent value="scores">
