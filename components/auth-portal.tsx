@@ -53,9 +53,9 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
           <Link href="/student/" className="mt-7 inline-block rounded-md bg-[#174943] px-4 py-2 text-white">前往學員專區</Link>
         </div>
       ) : teacher ? (
-        <TeacherDashboard />
+        <div className="workspace"><TeacherDashboard /></div>
       ) : (
-        <StudentDashboard isTeacher={user.role === 'teacher'} />
+        <div className="workspace"><StudentDashboard isTeacher={user.role === 'teacher'} /></div>
       )}
     </PortalShell>
   );

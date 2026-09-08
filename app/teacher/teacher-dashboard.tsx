@@ -87,13 +87,13 @@ export default function TeacherDashboard() {
     {message && <div role="status" className="notice success">{message}</div>}
 
     <section className="workshop-control-card">
-      <div className="workshop-control-copy"><span className="section-label">WORKSHOP CONTROL</span><h2>選擇或建立工作坊梯次</h2><p>每個梯次各自保存學員名冊、題目、成績與公布狀態。</p></div>
-      <label>目前工作坊梯次
+      <div className="workshop-control-copy"><span className="section-label">CURRENT WORKSHOP</span><h2>{data.selected.name}</h2><p>此梯次的名冊、四站題目、成績與公告皆獨立管理。</p></div>
+      <label>切換梯次
         <NativeSelect aria-label="選擇工作坊梯次" value={data.selected.id} disabled={busy} onChange={(event) => changeWorkshop(event.target.value)}>
           {data.workshops.map((workshop) => <NativeSelectOption key={workshop.id} value={workshop.id}>{workshop.name}</NativeSelectOption>)}
         </NativeSelect>
       </label>
-      <div className="command-summary"><span>本梯次學員 <strong>{data.students.length}</strong> 位</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公布' : '尚未公布'}</span></div>
+      <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>4</b> 個 OSCE 考站</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公告' : '成績未公告'}</span></div>
       <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
     </section>
     {showCreate && <form className="create-workshop-card" onSubmit={async (event) => {
@@ -111,6 +111,7 @@ export default function TeacherDashboard() {
 
       <TabsContent value="roster">
         <section className="workflow-intro"><strong>第一步：建立本梯次名冊</strong><span>可逐筆新增，或直接從 Excel 貼上姓名、Email、手機電話。</span></section>
+        <div className="roster-entry-grid">
         <section className="data-panel import-panel">
           <div className="panel-heading"><div><h2>批次匯入學員</h2><p className="form-help">欄位順序：姓名、Email、手機電話。第一列欄名可保留。</p></div></div>
           <form onSubmit={async (event) => {
@@ -121,10 +122,6 @@ export default function TeacherDashboard() {
             if (await save({ action: 'bulkImportStudents', students: rows.map(([name, email, phone]) => ({ name, email, phone })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
           }}><fieldset disabled={busy || !!data.selected.published}><textarea name="rows" placeholder={'姓名\tEmail\t手機電話\n王小明\tstudent@example.com\t0912345678'} /><Button className="action" type="submit">批次匯入名冊</Button></fieldset></form>
         </section>
-        <div className="roster-layout">
-          <section className="data-panel"><div className="panel-heading"><h2>學員名冊</h2><span>{data.students.length} 位學員</span></div>
-            {data.students.length ? <Table><TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}</TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請新增第一位學員。</p>}
-          </section>
           <section className="data-panel"><h2>{editing ? '編輯學員' : '新增學員'}</h2><p className="form-help">Email 與手機電話會作為學員登入與聯絡資訊。</p>
             <form key={editing?.id ?? 'new'} className="entry-form" onSubmit={async (event) => {
               event.preventDefault(); const form = event.currentTarget; const fields = new FormData(form);
@@ -132,6 +129,9 @@ export default function TeacherDashboard() {
             }}><fieldset disabled={busy || !!data.selected.published}><label>姓名<Input name="name" defaultValue={editing?.name ?? ''} required maxLength={100} /></label><label>登入 Email<Input name="email" type="email" defaultValue={editing?.email ?? ''} required maxLength={254} /></label><label>手機電話<Input name="phone" type="tel" defaultValue={editing?.phone ?? ''} required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button>{editing && <Button className="action secondary" type="button" onClick={() => setEditing(null)}>取消</Button>}</div></fieldset></form>
           </section>
         </div>
+        <section className="data-panel roster-current"><div className="panel-heading"><div><span className="section-label">CURRENT ROSTER</span><h2>目前學員名冊</h2></div><span>{data.students.length} 位學員</span></div>
+          {data.students.length ? <Table><TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}</TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
+        </section>
       </TabsContent>
 
       <TabsContent value="stations">
