@@ -31,12 +31,12 @@ type RecordItem = {
   stations?: StationDefinition[];
   profile?: { nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
 };
-const HOSPITALS = ['國立臺灣大學醫學院附設醫院','臺北榮民總醫院','三軍總醫院','臺北市立萬芳醫院－委託臺北醫學大學辦理','臺北市立聯合醫院','新光吳火獅紀念醫院','馬偕紀念醫院','亞東紀念醫院','長庚醫療財團法人林口長庚紀念醫院','長庚醫療財團法人基隆長庚紀念醫院','長庚醫療財團法人嘉義長庚紀念醫院','長庚醫療財團法人高雄長庚紀念醫院','中國醫藥大學附設醫院','中山醫學大學附設醫院','臺中榮民總醫院','彰化基督教醫療財團法人彰化基督教醫院','奇美醫療財團法人奇美醫院','國立成功大學醫學院附設醫院','高雄醫學大學附設中和紀念醫院','高雄榮民總醫院','義大醫療財團法人義大醫院','佛教慈濟醫療財團法人花蓮慈濟醫院'];
-function HospitalPicker({ defaultValue }: { defaultValue: string }) {
+type Hospital = { name: string; city: string; level: string };
+function HospitalPicker({ defaultValue, hospitals, loading }: { defaultValue: string; hospitals: Hospital[]; loading: boolean }) {
   const [query, setQuery] = useState(defaultValue);
   const [selected, setSelected] = useState(defaultValue);
-  const options = HOSPITALS.filter((item) => item.includes(query)).slice(0, 8);
-  return <label className="hospital-picker">服務醫院<Input value={query} onChange={(event) => { setQuery(event.target.value); setSelected(''); }} placeholder="輸入關鍵字搜尋醫院" autoComplete="off" /><input type="hidden" name="hospital" value={selected} />{query && !selected && <div className="hospital-options">{options.length ? options.map((item) => <button type="button" key={item} onClick={() => { setSelected(item); setQuery(item); }}>{item}</button>) : <p>找不到相符機構，請洽老師加入名單。</p>}</div>}{selected && <small>已選擇：{selected}</small>}</label>;
+  const options = hospitals.filter((item) => `${item.name}${item.city}${item.level}`.includes(query)).slice(0, 8);
+  return <label className="hospital-picker">服務醫院<Input value={query} onChange={(event) => { setQuery(event.target.value); setSelected(''); }} placeholder="輸入醫院或縣市關鍵字搜尋" autoComplete="off" /><input type="hidden" name="hospital" value={selected} />{loading && <small>正在載入政府醫院名冊…</small>}{query && !selected && !loading && <div className="hospital-options">{options.length ? options.map((item) => <button type="button" key={`${item.city}-${item.name}`} onClick={() => { setSelected(item.name); setQuery(item.name); }}>{item.name}<small>{item.city} · {item.level}</small></button>) : <p>找不到相符醫院，請調整關鍵字後再試。</p>}</div>}{selected && <small>已選擇：{selected}</small>}</label>;
 }
 export default function StudentDashboard({
   isTeacher,
@@ -46,7 +46,9 @@ export default function StudentDashboard({
   const [records, setRecords] = useState<RecordItem[] | null>(null),
     [selected, setSelected] = useState(''),
     [error, setError] = useState(''),
-    [profileBusy, setProfileBusy] = useState(false);
+    [profileBusy, setProfileBusy] = useState(false),
+    [hospitals, setHospitals] = useState<Hospital[]>([]),
+    [hospitalLoading, setHospitalLoading] = useState(true);
   useEffect(() => {
     const abort = new AbortController();
     rpc<{ records: RecordItem[] }>('nptc_student_data', {}, abort.signal)
@@ -58,13 +60,22 @@ export default function StudentDashboard({
       });
     return () => abort.abort();
   }, []);
+  useEffect(() => {
+    const abort = new AbortController();
+    fetch(`${import.meta.env.BASE_URL}data/accredited-hospitals.json`, { signal: abort.signal })
+      .then((response) => { if (!response.ok) throw new Error('無法載入政府醫院名冊。'); return response.json() as Promise<{ hospitals?: Hospital[] }>; })
+      .then((data) => setHospitals(Array.isArray(data.hospitals) ? data.hospitals : []))
+      .catch((cause) => { if (cause.name !== 'AbortError') setError('政府醫院名冊暫時無法載入，請重新整理後再試。'); })
+      .finally(() => setHospitalLoading(false));
+    return () => abort.abort();
+  }, []);
   const record = records?.find((r) => r.id === selected) ?? records?.[0];
   async function saveProfile(form: HTMLFormElement) {
     const fields = new FormData(form);
     setProfileBusy(true); setError('');
     try {
       const hospital = String(fields.get('hospital') ?? '');
-      if (!HOSPITALS.includes(hospital)) throw new Error('請由搜尋結果選擇服務醫院全名。');
+      if (!hospitals.some((item) => item.name === hospital)) throw new Error('請由政府醫院名冊的搜尋結果選擇服務醫院全名。');
       await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit') ?? ''), examSpecialty: String(fields.get('examSpecialty') ?? ''), firstOsce: fields.get('firstOsce') === 'yes', birthDate: String(fields.get('birthDate') ?? '') } });
       const data = await rpc<{ records: RecordItem[] }>('nptc_student_data'); setRecords(data.records);
     } catch (cause) { setError((cause as Error).message); } finally { setProfileBusy(false); }
@@ -129,7 +140,7 @@ export default function StudentDashboard({
             </label>
             <span className="identity-pill">手機電話 {maskPhone(record.phone)}</span>
           </div>
-          {!record.profile?.hospital || record.profile.firstOsce === null ? <section className="data-panel student-profile"><div className="panel-heading"><div><span className="section-label">FIRST LOGIN</span><h2>完成個人資料</h2><p className="form-help">姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。</p></div></div><form onSubmit={(event) => { event.preventDefault(); saveProfile(event.currentTarget); }}><fieldset disabled={profileBusy}><div className="profile-grid"><label>姓名<Input value={record.name} disabled /></label><label>Email<Input value={record.email ?? ''} disabled /></label><label>手機電話<Input value={record.phone ?? ''} disabled /></label><label>護理年資（年）<Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /></label><HospitalPicker defaultValue={record.profile?.hospital ?? ''} /><label>服務單位<Input name="unit" required maxLength={100} defaultValue={record.profile?.unit ?? ''} /></label><label>報考科別<NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}><NativeSelectOption value="">請選擇</NativeSelectOption>{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) => <NativeSelectOption value={item} key={item}>{item}</NativeSelectOption>)}</NativeSelect></label><label>是否首次報考國家 OSCE<NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}><NativeSelectOption value="">請選擇</NativeSelectOption><NativeSelectOption value="yes">是</NativeSelectOption><NativeSelectOption value="no">否</NativeSelectOption></NativeSelect></label><label>出生年月日<Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /></label></div><Button className="action" type="submit">{profileBusy ? '儲存中…' : '儲存個人資料'}</Button></fieldset></form></section> : <section className="profile-summary"><span>個人資料已完成</span><strong>{record.profile.examSpecialty}專科護理師</strong><p>{record.profile.hospital} · {record.profile.unit} · 護理年資 {record.profile.nursingYears} 年</p></section>}
+          {!record.profile?.hospital || record.profile.firstOsce === null ? <section className="data-panel student-profile"><div className="panel-heading"><div><span className="section-label">FIRST LOGIN</span><h2>完成個人資料</h2><p className="form-help">姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。服務醫院請由政府名冊搜尋並點選全名。</p></div></div><form onSubmit={(event) => { event.preventDefault(); saveProfile(event.currentTarget); }}><fieldset disabled={profileBusy || hospitalLoading}><div className="profile-grid"><label>姓名<Input value={record.name} disabled /></label><label>Email<Input value={record.email ?? ''} disabled /></label><label>手機電話<Input value={record.phone ?? ''} disabled /></label><label>護理年資（年）<Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /></label><HospitalPicker defaultValue={record.profile?.hospital ?? ''} hospitals={hospitals} loading={hospitalLoading} /><label>服務單位<Input name="unit" required maxLength={100} defaultValue={record.profile?.unit ?? ''} /></label><label>報考科別<NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}><NativeSelectOption value="">請選擇</NativeSelectOption>{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) => <NativeSelectOption value={item} key={item}>{item}</NativeSelectOption>)}</NativeSelect></label><label>是否首次報考國家 OSCE<NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}><NativeSelectOption value="">請選擇</NativeSelectOption><NativeSelectOption value="yes">是</NativeSelectOption><NativeSelectOption value="no">否</NativeSelectOption></NativeSelect></label><label>出生年月日<Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /></label></div><Button className="action" type="submit">{profileBusy ? '儲存中…' : '儲存個人資料'}</Button></fieldset></form></section> : <section className="profile-summary"><span>個人資料已完成</span><strong>{record.profile.examSpecialty}專科護理師</strong><p>{record.profile.hospital} · {record.profile.unit} · 護理年資 {record.profile.nursingYears} 年</p></section>}
           {!record.published ? (
             <section className="empty-panel">
               <h2>本梯次成績尚未公布</h2>
