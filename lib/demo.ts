@@ -11,6 +11,12 @@ type Student = Record<string, string | number | null> & {
   name: string;
   email: string;
   phone: string;
+  nursing_years?: number | null;
+  hospital?: string | null;
+  unit?: string | null;
+  exam_specialty?: string | null;
+  first_osce?: boolean | null;
+  birth_date?: string | null;
   revision: number;
   updated_at: string;
 };
@@ -95,7 +101,8 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
       const workshop = data.workshops.find(item => item.id === student.workshop_id)!;
       const published = workshop.published;
       return {
-        id: student.id, name: student.name, phone: student.phone, workshopName: workshop.name, published,
+        id: student.id, name: student.name, email: student.email, phone: student.phone, workshopName: workshop.name, published,
+        profile: { nursingYears: student.nursing_years ?? null, hospital: student.hospital ?? '', unit: student.unit ?? '', examSpecialty: student.exam_specialty ?? '', firstOsce: student.first_osce ?? null, birthDate: student.birth_date ?? '' },
         stations: published ? workshop.stations : [],
         updatedAt: published ? student.updated_at : null,
         grades: published ? STATIONS.map(({ key }) => ({ key, score: student[`${key}_score`], rating: student[`${key}_rating`], feedback: student[`${key}_feedback`] })) : [],
@@ -118,6 +125,12 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
       student[`${body.station}_score`] = item.score; student[`${body.station}_rating`] = item.rating; student[`${body.station}_feedback`] = item.feedback;
       student.revision += 1; student.updated_at = new Date().toISOString(); student.updated_by = teacher.email;
     }
+    save(data); return { ok: true } as T;
+  }
+  if (name === 'nptc_student_update_profile') {
+    const body = args.body as { nursingYears?: number; hospital?: string; unit?: string; examSpecialty?: string; firstOsce?: boolean; birthDate?: string };
+    if (!Number.isInteger(body.nursingYears) || body.nursingYears! < 0 || body.nursingYears! > 60 || !body.hospital?.trim() || !body.unit?.trim() || !body.examSpecialty?.trim() || typeof body.firstOsce !== 'boolean' || !/^\d{4}-\d{2}-\d{2}$/.test(body.birthDate ?? '')) throw new Error('請完整填寫個人資料。');
+    data.students.filter((student) => student.email === user.email).forEach((student) => Object.assign(student, { nursing_years: body.nursingYears, hospital: body.hospital!.trim(), unit: body.unit!.trim(), exam_specialty: body.examSpecialty!.trim(), first_osce: body.firstOsce, birth_date: body.birthDate }));
     save(data); return { ok: true } as T;
   }
   if (name !== 'nptc_teacher_write') throw new Error('不支援的展示資料操作。');
