@@ -11,7 +11,7 @@
 
 展示資料只存在使用者目前瀏覽器的 localStorage。要恢復 Supabase 的 Email 驗證登入，將 `lib/demo.ts` 的 `DEMO_MODE` 改為 `false`，再依下列 Supabase 初始化設定完成 SMTP 與 Redirect URL。
 
-正式登入改採 Email／密碼後，學員登入欄位會是「Email＋身分證後三碼」。身分證後三碼只能在建立 Supabase Auth 帳號時作為初始密碼使用，不能存進學員名冊、CSV 或一般資料表；建議在首次登入後要求學員改密碼。
+正式登入採 Email 驗證或 Email／密碼模式；姓名、Email 與手機電話用於辨識學員與課程聯絡。若使用 Email／密碼，應要求學員首次登入後自行變更密碼。
 
 ## 啟動與建置
 
@@ -35,7 +35,7 @@ node node_modules/vite/bin/vite.js preview --host 127.0.0.1
 
 在對應專案的 SQL Editor 執行 `supabase/setup.sql`。老師信箱已設定為 `chin.wei.chang0923@gmail.com`。
 
-若已執行過初版設定，依序執行 `supabase/upgrade-workshop-management.sql` 與 `supabase/upgrade-score-feedback.sql`。後者會加入每題的短評欄位與「勾選多位學員後批次儲存成績」功能。
+若已執行過初版設定，依序執行 `supabase/upgrade-workshop-management.sql`、`supabase/upgrade-score-feedback.sql` 與 `supabase/upgrade-student-phone.sql`。最後一份腳本會將名冊登入資訊改為姓名、Email、手機電話。
 
 - 啟用 Email 驗證登入與註冊，並設定可寄信的 SMTP。自架 Supabase 的環境設定需在 Zeabur 修改。
 - 將 Site URL 設定為正式前端網址，Redirect URLs 加入正式網址 `/student/` 與 `/teacher/`，本機測試另加入 `http://127.0.0.1:5173/student/` 與 `/teacher/`。
@@ -54,7 +54,7 @@ node node_modules/vite/bin/vite.js preview --host 127.0.0.1
 
 每題分數 0–100，Rating 為 1–5 整數；兩欄成對填寫或留空。固定及格線 60 分。邊緣及格分數為該梯次 Rating=3 的平均。公布後禁止修改，撤回後才能編輯；revision 防止覆寫新版資料，梯次鎖防止公布與修改互相競爭。
 
-每個梯次另有四站題目設定：第一天兩題、第二天兩題，分別可記錄題目名稱與命題內容。名冊可由 Excel 貼上「姓名、身分證字號、Email」三欄批次匯入；名冊僅顯示遮蔽後的身分證字號。學員只能查看自己的已公布成績與各站邊緣及格分數。
+每個梯次另有四站題目設定：第一天兩題、第二天兩題，分別可記錄題目名稱與命題內容。名冊可由 Excel 貼上「姓名、Email、手機電話」三欄批次匯入；名冊中的手機電話會遮蔽顯示。學員只能查看自己的已公布成績與各站邊緣及格分數。
 
 舊 D1 後端程式已從此專案移除。若舊 D1 資料庫仍有正式名冊，需要另外匯出後再匯入 Supabase。
 

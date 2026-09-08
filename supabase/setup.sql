@@ -10,10 +10,10 @@ create table if not exists nptc_private.students(
  id uuid primary key default gen_random_uuid(),workshop_id uuid not null references nptc_private.workshops(id),
  name text not null check(length(trim(name)) between 1 and 100),
  email text not null check(email=lower(trim(email)) and length(email)<=254 and email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'),
- national_id text not null check(upper(trim(national_id)) ~ '^[A-Z][12][0-9]{8}$'),revision integer not null default 0,
+ phone text not null check(trim(phone) ~ '^09[0-9]{8}$'),national_id text,revision integer not null default 0,
  q1_score numeric,q1_rating integer,q1_feedback text not null default '' check(length(q1_feedback)<=500),q2_score numeric,q2_rating integer,q2_feedback text not null default '' check(length(q2_feedback)<=500),q3_score numeric,q3_rating integer,q3_feedback text not null default '' check(length(q3_feedback)<=500),q4_score numeric,q4_rating integer,q4_feedback text not null default '' check(length(q4_feedback)<=500),
  updated_at timestamptz not null default now(),updated_by uuid not null,
- unique(workshop_id,email),unique(workshop_id,national_id),
+ unique(workshop_id,email),unique(workshop_id,phone),
  check((q1_score is null and q1_rating is null) or (q1_score is not null and q1_rating is not null and q1_score between 0 and 100 and q1_rating between 1 and 5)),
  check((q2_score is null and q2_rating is null) or (q2_score is not null and q2_rating is not null and q2_score between 0 and 100 and q2_rating between 1 and 5)),
  check((q3_score is null and q3_rating is null) or (q3_score is not null and q3_rating is not null and q3_score between 0 and 100 and q3_rating between 1 and 5)),
@@ -42,14 +42,14 @@ begin
  if not public.nptc_is_teacher() then raise exception '此帳號沒有老師權限。' using errcode='42501'; end if;
  select coalesce(jsonb_agg(to_jsonb(w) order by w.created_at desc,w.id),'[]') into items from nptc_private.workshops w;
  select * into selected from nptc_private.workshops w order by (w.id=requested_workshop) desc nulls last,w.created_at desc,w.id limit 1;
- select coalesce(jsonb_agg(to_jsonb(s) order by s.national_id,s.name),'[]') into roster from nptc_private.students s where s.workshop_id=selected.id;
+ select coalesce(jsonb_agg(to_jsonb(s) order by s.phone,s.name),'[]') into roster from nptc_private.students s where s.workshop_id=selected.id;
  return jsonb_build_object('workshops',items,'selected',case when selected.id is null then null else to_jsonb(selected) end,'students',roster,'thresholds',case when selected.id is null then '[]'::jsonb else nptc_private.thresholds(selected.id) end);
 end;$$;
 create or replace function public.nptc_student_data() returns jsonb language plpgsql stable security definer set search_path='' as $$
 declare result jsonb;
 begin
  if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
- select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'national_id',s.national_id,'workshopName',w.name,'published',w.published,
+ select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'phone',s.phone,'workshopName',w.name,'published',w.published,
  'updatedAt',case when w.published=1 then s.updated_at end,
  'grades',case when w.published=1 then jsonb_build_array(
  jsonb_build_object('key','q1','score',s.q1_score,'rating',s.q1_rating,'feedback',s.q1_feedback),jsonb_build_object('key','q2','score',s.q2_score,'rating',s.q2_rating,'feedback',s.q2_feedback),
@@ -85,11 +85,11 @@ begin
   get diagnostics affected=row_count;
   if affected=0 then raise exception '資料已更新或已被刪除，請重新載入。'; end if;
  elsif action='saveStudent' then
-  if jsonb_typeof(body->'name') is distinct from 'string' or jsonb_typeof(body->'email') is distinct from 'string' or jsonb_typeof(body->'national_id') is distinct from 'string' then raise exception '請完整填寫姓名、Email 與身分證字號。'; end if;
+  if jsonb_typeof(body->'name') is distinct from 'string' or jsonb_typeof(body->'email') is distinct from 'string' or jsonb_typeof(body->'phone') is distinct from 'string' then raise exception '請完整填寫姓名、Email 與手機電話。'; end if;
   if body->>'id' is null then
-   insert into nptc_private.students(workshop_id,name,email,national_id,updated_by) values(w.id,trim(body->>'name'),lower(trim(body->>'email')),trim(body->>'national_id'),auth.uid());
+   insert into nptc_private.students(workshop_id,name,email,phone,updated_by) values(w.id,trim(body->>'name'),lower(trim(body->>'email')),trim(body->>'phone'),auth.uid());
   else
-   update nptc_private.students set name=trim(body->>'name'),email=lower(trim(body->>'email')),national_id=trim(body->>'national_id'),revision=revision+1,updated_at=now(),updated_by=auth.uid()
+   update nptc_private.students set name=trim(body->>'name'),email=lower(trim(body->>'email')),phone=trim(body->>'phone'),revision=revision+1,updated_at=now(),updated_by=auth.uid()
    where id=(body->>'id')::uuid and workshop_id=w.id and revision=(body->>'revision')::integer;
    get diagnostics affected=row_count;
    if affected=0 then raise exception '資料已更新，請重新載入後再編輯。'; end if;
@@ -115,8 +115,8 @@ begin
   if affected=0 then raise exception '資料已更新，請重新載入後再編輯。'; end if;
  end if;
  return '{"ok":true}';
-exception when unique_violation then raise exception '此梯次已有相同的身分證字號或 Email。';
- when check_violation or not_null_violation then raise exception '欄位格式或範圍不正確，請確認姓名、Email、身分證字號與成績。';
+exception when unique_violation then raise exception '此梯次已有相同的手機電話或 Email。';
+ when check_violation or not_null_violation then raise exception '欄位格式或範圍不正確，請確認姓名、Email、手機電話與成績。';
 end;$$;
 revoke all on function public.nptc_is_teacher() from public,anon;
 revoke all on function public.nptc_teacher_data(uuid) from public,anon;
