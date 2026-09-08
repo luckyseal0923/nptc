@@ -68,6 +68,12 @@ export function signInDemo(role: DemoRole, username: string, password: string) {
   const user: DemoUser = { role: account.role, username: account.username, email: account.email };
   localStorage.setItem(sessionKey, JSON.stringify(user));
 }
+export function signInDemoStudent(email: string, phone: string) {
+  const student = state().students.find((item) => item.email === email.trim().toLowerCase() && item.phone === phone.trim().replace(/[\s-]/g, ''));
+  if (!student) throw new Error('找不到相符的學員資料，請確認 Email 與手機電話。');
+  const user: DemoUser = { role: 'student', username: student.email, email: student.email };
+  localStorage.setItem(sessionKey, JSON.stringify(user));
+}
 export function signOutDemo() { localStorage.removeItem(sessionKey); }
 
 function requireUser() { const user = demoUser(); if (!user) throw new Error('請先登入。'); return user; }
