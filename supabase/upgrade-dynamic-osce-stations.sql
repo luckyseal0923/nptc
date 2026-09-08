@@ -30,7 +30,7 @@ update nptc_private.workshops set published_stations=(select coalesce(jsonb_agg(
 
 create or replace function nptc_private.dynamic_thresholds(w uuid, visible_only boolean default false) returns jsonb language sql stable security definer set search_path='' as $$
  select coalesce(jsonb_agg(jsonb_build_object('key',q.key,'value',q.value,'count',q.n) order by q.ord),'[]'::jsonb) from (
-  select x->>'key' key, x.ordinality ord, avg(g.score) filter(where g.rating=3) value, count(g.score) filter(where g.rating=3) n
+  select x.value->>'key' key, x.ordinality ord, avg(g.score) filter(where g.rating=3) value, count(g.score) filter(where g.rating=3) n
   from nptc_private.workshops wk cross join lateral jsonb_array_elements(wk.stations) with ordinality x(value,ordinality)
   left join nptc_private.station_grades g on g.station_key=x.value->>'key' and g.student_id in (select id from nptc_private.students where workshop_id=wk.id)
   where wk.id=w and (not visible_only or exists(select 1 from jsonb_array_elements(wk.published_stations) p where p->>'key'=x.value->>'key'))
