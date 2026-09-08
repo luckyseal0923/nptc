@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { STATIONS, formatScore, maskPhone, validateGrade, workshopStations, type Student, type StationDefinition, type StationKey, type Workshop, type Threshold } from '@/lib/grading';
+import { formatScore, maskPhone, validateGrade, workshopStations, type Student, type StationDefinition, type Workshop, type Threshold } from '@/lib/grading';
 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
 
@@ -18,10 +18,12 @@ export default function TeacherDashboard() {
   const [editing, setEditing] = useState<Student | null>(null);
   const [tab, setTab] = useState('roster');
   const [showCreate, setShowCreate] = useState(false);
-  const [scoreStation, setScoreStation] = useState<StationKey>('q1');
+  const [scoreStation, setScoreStation] = useState('q1');
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
-  const [openedStationKeys, setOpenedStationKeys] = useState<Set<StationKey>>(new Set());
+  const [stationDrafts, setStationDrafts] = useState<StationDefinition[] | null>(null);
   const stations = workshopStations(data?.selected);
+  const editableStations = stationDrafts ?? stations;
+  const publishedStationKeys = new Set(data?.selected?.publishedStations ?? (data?.selected?.published ? stations.map((station) => station.key) : []));
   const selectedStation = stations.find((station) => station.key === scoreStation) ?? stations[0];
   const selectedThreshold = data?.thresholds.find((item) => item.key === scoreStation);
 
@@ -29,6 +31,7 @@ export default function TeacherDashboard() {
     const result = await rpc<Data>('nptc_teacher_data', { requested_workshop: id ?? null }, signal);
     setData(result);
     setEditing(null);
+    setStationDrafts(null);
     return result;
   }
   useEffect(() => {
@@ -43,7 +46,9 @@ export default function TeacherDashboard() {
   async function save(payload: Record<string, unknown>, success: string) {
     setBusy(true); setError(''); setMessage('');
     try {
-      const result = await rpc<{ id?: string }>('nptc_teacher_write', { body: { ...payload, workshopId: data?.selected?.id } });
+      const body = { ...payload, workshopId: data?.selected?.id };
+      const rpcName = payload.action === 'saveStations' ? 'nptc_teacher_save_stations' : payload.action === 'publishStation' ? 'nptc_teacher_publish_station' : 'nptc_teacher_write';
+      const result = await rpc<{ id?: string }>(rpcName, { body });
       await load(result.id ?? data?.selected?.id);
       setMessage(success);
       return true;
@@ -62,7 +67,7 @@ export default function TeacherDashboard() {
         feedback: String(fields.get(`${student.id}_feedback`) ?? '').trim(),
       }));
       setBusy(true); setError(''); setMessage('');
-      await rpc('nptc_teacher_batch_scores', { body: { workshopId: currentData.selected.id, station: scoreStation, items } });
+      await rpc('nptc_teacher_batch_scores_v2', { body: { workshopId: currentData.selected.id, station: scoreStation, items } });
       await load(currentData.selected.id);
       setSelectedStudentIds(new Set());
       setMessage(`已儲存 ${items.length} 位學員的${selectedStation.title}成績與回饋。`);
@@ -88,13 +93,13 @@ export default function TeacherDashboard() {
     {message && <div role="status" className="notice success">{message}</div>}
 
     <section className="workshop-control-card">
-      <div className="workshop-control-copy"><span className="section-label">CURRENT WORKSHOP</span><h2>{data.selected.name}</h2><p>此梯次的名冊、四站題目、成績與公告皆獨立管理。</p></div>
+      <div className="workshop-control-copy"><span className="section-label">CURRENT WORKSHOP</span><h2>{data.selected.name}</h2><p>此梯次的名冊、OSCE 題目、成績與公告皆獨立管理。</p></div>
       <label>切換梯次
         <NativeSelect aria-label="選擇工作坊梯次" value={data.selected.id} disabled={busy} onChange={(event) => changeWorkshop(event.target.value)}>
           {data.workshops.map((workshop) => <NativeSelectOption key={workshop.id} value={workshop.id}>{workshop.name}</NativeSelectOption>)}
         </NativeSelect>
       </label>
-      <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>4</b> 個 OSCE 考站</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公告' : '成績未公告'}</span></div>
+      <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>{stations.length}</b> 個 OSCE 題目</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公告' : '成績未公告'}</span></div>
       <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
     </section>
     {showCreate && <form className="create-workshop-card" onSubmit={async (event) => {
@@ -107,7 +112,7 @@ export default function TeacherDashboard() {
 
     <Tabs className="teacher-workflow-tabs" value={tab} onValueChange={(value) => changeTab(String(value))}>
       <nav className="workflow-card-grid" aria-label="教學評量流程">
-        {[['roster','1','建立學員名冊','新增單筆資料或由 Excel 批次匯入'],['stations','2','設定 OSCE 題目','填寫兩天共四個站點的內容'],['scores','3','登錄成績與回饋','勾選學員後批次儲存分數'],['publish','4','確認並公布','開放學員查看自己的成績']].map(([value,number,title,description]) => <button key={value} type="button" disabled={busy} onClick={() => changeTab(value)} className={tab===value ? 'workflow-card active' : 'workflow-card'}><span>STEP {number}</span><strong>{title}</strong><small>{description}</small></button>)}
+        {[['roster','1','建立學員名冊','新增單筆資料或由 Excel 批次匯入'],['stations','2','新增 OSCE 題目','登錄測驗日期、主訴、診斷與命題摘要'],['scores','3','登錄成績與回饋','勾選學員後批次儲存分數'],['publish','4','確認並公布','開放學員查看自己的成績']].map(([value,number,title,description]) => <button key={value} type="button" disabled={busy} onClick={() => changeTab(value)} className={tab===value ? 'workflow-card active' : 'workflow-card'}><span>STEP {number}</span><strong>{title}</strong><small>{description}</small></button>)}
       </nav>
 
       <TabsContent value="roster">
@@ -136,32 +141,28 @@ export default function TeacherDashboard() {
       </TabsContent>
 
       <TabsContent value="stations">
-        <section className="workflow-intro"><strong>第二步：設定四個 OSCE 題目</strong><span>點選「新增題目」後輸入題目名稱與命題內容。</span></section>
+        <section className="workflow-intro"><strong>第二步：新增 OSCE 題目</strong><span>每一題依序登錄測驗日期、個案主訴、最終診斷與命題內容摘要；題數不限。</span></section>
         <section className="data-panel"><form key={data.selected.id} onSubmit={(event) => {
           event.preventDefault(); const fields = new FormData(event.currentTarget);
-          const configured = stations.map((station): StationDefinition => ({ ...station, title: String(fields.get(`${station.key}_title`) ?? station.title), prompt: String(fields.get(`${station.key}_prompt`) ?? station.prompt) }));
-          save({ action: 'saveStations', stations: configured }, '四站題目設定已儲存。');
-        }}><fieldset disabled={busy || !!data.selected.published}><div className="station-settings-grid station-settings-all">{stations.map((station) => {
-          const isConfigured = openedStationKeys.has(station.key) || station.title !== (station.key === 'q1' || station.key === 'q3' ? '第一題' : '第二題') || Boolean(station.prompt);
-          const questionNumber = stations.findIndex((item) => item.key === station.key) + 1;
-          return isConfigured ? <article className="station-setting" key={station.key}><span>OSCE 第 {questionNumber} 題</span><label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /></label><label>命題內容<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} maxLength={2000} placeholder="例如：個案情境、任務與評分重點" /></label></article> : <button className="add-station-card" key={station.key} type="button" onClick={() => setOpenedStationKeys((current) => new Set(current).add(station.key))}><span>OSCE 第 {questionNumber} 題</span><strong>＋ 新增題目</strong><small>新增後填寫題目名稱與命題內容</small></button>;
-        })}</div><Button type="submit" className="action">儲存題目設定</Button></fieldset></form></section>
+          const configured = editableStations.map((station): StationDefinition => ({ ...station, title: String(fields.get(`${station.key}_title`) ?? '').trim(), testDate: String(fields.get(`${station.key}_testDate`) ?? ''), complaint: String(fields.get(`${station.key}_complaint`) ?? '').trim(), diagnosis: String(fields.get(`${station.key}_diagnosis`) ?? '').trim(), prompt: String(fields.get(`${station.key}_prompt`) ?? '').trim() }));
+          save({ action: 'saveStations', stations: configured }, 'OSCE 題目設定已儲存。');
+        }}><fieldset disabled={busy || !!data.selected.published}><div className="station-settings-grid station-settings-all">{editableStations.map((station, index) => <article className="station-setting" key={station.key}><span>OSCE 第 {index + 1} 題</span><label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /></label><label>測驗日期<Input name={`${station.key}_testDate`} type="date" defaultValue={station.testDate} required /></label><label>個案主訴<Input name={`${station.key}_complaint`} defaultValue={station.complaint} required maxLength={300} placeholder="例如：胸痛、呼吸困難" /></label><label>最終診斷<Input name={`${station.key}_diagnosis`} defaultValue={station.diagnosis} required maxLength={300} placeholder="例如：急性心肌梗塞" /></label><label>命題內容摘要<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} required maxLength={2000} placeholder="簡述任務、情境與評分重點" /></label></article>)}</div><div className="form-actions"><Button type="button" className="action secondary" onClick={() => setStationDrafts([...editableStations, { key: `station_${crypto.randomUUID()}`, title: '', testDate: '', complaint: '', diagnosis: '', prompt: '' }])}>＋ 新增題目</Button><Button type="submit" className="action">儲存題目設定</Button></div></fieldset></form></section>
       </TabsContent>
 
       <TabsContent value="scores">
         <section className="workflow-intro"><strong>第三步：選擇一站，再登錄該站成績</strong><span>固定及格線為 60 分；邊緣及格線取 Global Rating＝3 的平均。</span></section>
         <div className="station-picker">{stations.map((station) => {
           const threshold = data.thresholds.find((item) => item.key === station.key);
-          return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}><span>第 {station.day} 天</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
+          return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}><span>{station.testDate || '尚未設定測驗日期'}</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
         })}</div>
-        <section className="data-panel score-station-panel"><div className="panel-heading"><div><span className="section-label">DAY {selectedStation.day}</span><h2>{selectedStation.title}</h2><p className="form-help">{selectedStation.prompt || '尚未填寫命題內容。'}</p></div><div className="threshold-chip">Rating＝3 平均<br /><strong>{formatScore(selectedThreshold?.value ?? null)} 分</strong></div></div>
+        <section className="data-panel score-station-panel"><div className="panel-heading"><div><span className="section-label">{selectedStation.testDate || '測驗日期未設定'}</span><h2>{selectedStation.title}</h2><p className="form-help">{selectedStation.complaint && `主訴：${selectedStation.complaint}　`}{selectedStation.diagnosis && `最終診斷：${selectedStation.diagnosis}`}<br />{selectedStation.prompt || '尚未填寫命題內容摘要。'}</p></div><div className="threshold-chip">Rating＝3 平均<br /><strong>{formatScore(selectedThreshold?.value ?? null)} 分</strong></div></div>
           {data.students.length ? <form className="score-batch-form" key={scoreStation} onSubmit={(event) => { event.preventDefault(); saveScoreBatch(event.currentTarget); }}><fieldset disabled={busy || !!data.selected!.published}><Table><TableHeader><TableRow><TableHead>儲存</TableHead><TableHead>學員</TableHead><TableHead>分數</TableHead><TableHead>Global Rating</TableHead><TableHead>質性回饋</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell><input type="checkbox" aria-label={`選取 ${student.name}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); event.target.checked ? next.add(student.id) : next.delete(student.id); return next; })} /></TableCell><TableCell>{student.name}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><Input name={`${student.id}_score`} type="number" min={0} max={100} step="any" defaultValue={student[`${scoreStation}_score`] ?? ''} /></TableCell><TableCell><NativeSelect name={`${student.id}_rating`} defaultValue={student[`${scoreStation}_rating`] ?? ''}><NativeSelectOption value="">未評分</NativeSelectOption>{[1, 2, 3, 4, 5].map((number) => <NativeSelectOption key={number} value={number}>{number}</NativeSelectOption>)}</NativeSelect></TableCell><TableCell><textarea name={`${student.id}_feedback`} maxLength={500} defaultValue={student[`${scoreStation}_feedback`] ?? ''} placeholder="簡短回饋（最多 500 字）" /></TableCell></TableRow>)}</TableBody></Table><div className="batch-save-bar"><span>已選取 <strong>{selectedStudentIds.size}</strong> 位學員；只會儲存勾選的資料。</span><Button type="submit" className="action">批次儲存已勾選成績</Button></div></fieldset></form> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
         </section>
       </TabsContent>
 
       <TabsContent value="publish">
-        <section className="workflow-intro"><strong>第四步：確認後公布成績</strong><span>公布後，學員只看得到自己的分數與各站邊緣及格線。</span></section>
-        <section className="data-panel publish-panel"><div><span className={data.selected.published ? 'status-badge published' : 'status-badge'}>{data.selected.published ? '目前已公布' : '目前未公布'}</span><h2>{data.selected.published ? '學員已可查詢個人成績' : '確認四站成績後即可公布'}</h2><p>{data.selected.published ? '如需修正名冊、題目或成績，請先撤回公布。' : '至少要有一筆已登錄成績才能公布。'}</p></div><Button disabled={busy} className="action" onClick={() => save({ action: 'publish', published: !data.selected!.published }, data.selected!.published ? '已撤回公布，現在可以編輯。' : '成績已公布，學員可查看本人紀錄。')}>{data.selected.published ? '撤回公布，回到編輯' : '公布本梯次成績'}</Button></section>
+        <section className="workflow-intro"><strong>第四步：逐題確認並公布成績</strong><span>每一題可獨立公布或撤回；學員只會看到已公布題目的分數與邊緣及格線。</span></section>
+        <section className="data-panel"><div className="panel-heading"><div><span className="section-label">PUBLISH BY QUESTION</span><h2>選擇要公布的 OSCE 題目</h2><p className="form-help">公布後該題成績會鎖定；要修改請先撤回該題公告。</p></div><span>{publishedStationKeys.size} / {stations.length} 題已公布</span></div><div className="station-picker">{stations.map((station) => { const isPublished = publishedStationKeys.has(station.key); return <article className="station-card" key={station.key}><span>{station.testDate || '測驗日期未設定'}</span><strong>{station.title}</strong><small>{isPublished ? '已公布，學員可查詢' : '尚未公布'}</small><Button disabled={busy} className={isPublished ? 'action secondary small' : 'action small'} onClick={() => save({ action: 'publishStation', station: station.key, published: !isPublished }, isPublished ? `已撤回「${station.title}」的公告。` : `已公布「${station.title}」的成績。`)}>{isPublished ? '撤回公告' : '公布本題'}</Button></article>; })}</div></section>
       </TabsContent>
     </Tabs>
   </>;

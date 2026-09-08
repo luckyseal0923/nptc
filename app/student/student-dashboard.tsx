@@ -2,10 +2,8 @@ import { rpc } from '@/lib/supabase';
 ('use client');
 import { useEffect, useState } from 'react';
 import {
-  STATIONS,
   formatScore,
   gradeStatus,
-  DEFAULT_STATIONS,
   maskPhone,
   type StationDefinition,
   type Grade,
@@ -153,7 +151,7 @@ export default function StudentDashboard({
                   <span>評量紀錄</span>
                   <strong>
                     {record.grades.filter((g) => g.score !== null).length}
-                    <small> / 4 題已登錄</small>
+                    <small> / {record.stations?.length ?? 0} 題已登錄</small>
                   </strong>
                 </div>
                 <div>
@@ -176,22 +174,19 @@ export default function StudentDashboard({
                 <p>每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。其中 Rating＝3 代表考官認為學員的表現剛好達到通過國家考試的程度；系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。</p>
                 <p><strong>它用來幫助你理解自己的表現與考官判斷的基準。</strong> 本系統的正式及格判定仍以固定 60 分為準；邊緣及格分數只供學習與回饋參考。</p>
               </section>
-              {[1, 2].map((day) => (
-                <section className="day-section" key={day}>
-                  <div className="day-heading">
-                    <span>DAY {String(day).padStart(2, '0')}</span>
-                    <h2>第{day === 1 ? '一' : '二'}天 OSCE</h2>
-                  </div>
-                  <div className="student-score-grid">
-                    {STATIONS.filter((s) => s.day === day).map((s) => {
-                      const station = record.stations?.find((item) => item.key === s.key) ?? DEFAULT_STATIONS.find((item) => item.key === s.key)!;
-                      const g = record.grades.find((g) => g.key === s.key),
+              <section className="day-section">
+                <div className="day-heading"><span>OSCE RESULTS</span><h2>已公布的 OSCE 成績</h2></div>
+                <div className="student-score-grid">
+                    {(record.stations ?? []).map((station) => {
+                      const g = record.grades.find((g) => g.key === station.key),
                         score = g?.score ?? null,
-                        t = record.thresholds.find((t) => t.key === s.key);
+                        t = record.thresholds.find((t) => t.key === station.key);
                       return (
-                        <article className="student-score-card" key={s.key}>
+                        <article className="student-score-card" key={station.key}>
                           <div className="panel-heading">
                             <h3>{station.title}</h3>
+                            {station.testDate && <span className="section-label">測驗日期：{station.testDate}</span>}
+                            {(station.complaint || station.diagnosis) && <p className="form-help mt-1">{station.complaint && `主訴：${station.complaint}`} {station.diagnosis && `｜最終診斷：${station.diagnosis}`}</p>}
                             {station.prompt && <p className="form-help mt-1">{station.prompt}</p>}
                             <span
                               className={`result-badge ${score === null ? 'pending' : score >= 60 ? 'pass' : 'below'}`}
@@ -258,9 +253,8 @@ export default function StudentDashboard({
                         </article>
                       );
                     })}
-                  </div>
-                </section>
-              ))}
+                </div>
+              </section>
               <div className="score-legend">
                 <span>
                   <i className="legend-fixed" />

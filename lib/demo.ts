@@ -4,7 +4,7 @@ export const DEMO_MODE = true;
 
 type DemoRole = 'teacher' | 'student';
 type DemoUser = { role: DemoRole; username: string; email: string };
-type Workshop = { id: string; name: string; published: number; created_at: string; stations: StationDefinition[] };
+type Workshop = { id: string; name: string; published: number; publishedStations?: string[]; created_at: string; stations: StationDefinition[] };
 type Student = Record<string, string | number | null> & {
   id: string;
   workshop_id: string;
@@ -32,11 +32,11 @@ const accounts: Record<DemoRole, DemoUser & { password: string }> = {
 function initialState(): State {
   const now = new Date().toISOString();
   return {
-    workshops: [{ id: 'demo-workshop', name: '示範 OSCE 班', published: 1, created_at: now, stations: [
-      { ...DEFAULT_STATIONS[0], title: '初步評估與處置', prompt: '依個案主訴完成初步評估、臨床推理與處置說明。' },
-      { ...DEFAULT_STATIONS[1], title: '溝通與衛教', prompt: '以病人可理解的方式說明評估結果與後續處置。' },
-      { ...DEFAULT_STATIONS[2], title: '病況辨識', prompt: '辨識關鍵臨床線索，提出優先處置與追蹤計畫。' },
-      { ...DEFAULT_STATIONS[3], title: '整合照護', prompt: '整合病史、檢查與照護需求，完成臨床決策。' },
+    workshops: [{ id: 'demo-workshop', name: '示範 OSCE 班', published: 0, publishedStations: ['q1','q2','q3','q4'], created_at: now, stations: [
+      { ...DEFAULT_STATIONS[0], title: '初步評估與處置', testDate: '2026-09-01', complaint: '胸痛', diagnosis: '急性冠心症', prompt: '依個案主訴完成初步評估、臨床推理與處置說明。' },
+      { ...DEFAULT_STATIONS[1], title: '溝通與衛教', testDate: '2026-09-01', complaint: '胸痛', diagnosis: '急性冠心症', prompt: '以病人可理解的方式說明評估結果與後續處置。' },
+      { ...DEFAULT_STATIONS[2], title: '病況辨識', testDate: '2026-09-02', complaint: '呼吸困難', diagnosis: '肺炎', prompt: '辨識關鍵臨床線索，提出優先處置與追蹤計畫。' },
+      { ...DEFAULT_STATIONS[3], title: '整合照護', testDate: '2026-09-02', complaint: '發燒', diagnosis: '敗血症', prompt: '整合病史、檢查與照護需求，完成臨床決策。' },
     ] }],
     students: [{
       id: 'demo-student', workshop_id: 'demo-workshop', name: '示範學員', email: accounts.student.email,
@@ -58,8 +58,8 @@ function state(): State {
   } catch { return initialState(); }
 }
 function save(next: State) { localStorage.setItem(storageKey, JSON.stringify(next)); }
-function thresholds(students: Student[]) {
-  return STATIONS.map(({ key }) => {
+function thresholds(students: Student[], stations: StationDefinition[]) {
+  return stations.map(({ key }) => {
     const grades = students.map(student => ({ score: student[`${key}_score`] as number | null, rating: student[`${key}_rating`] as number | null }));
     return { key, ...computeThreshold(grades) };
   });
@@ -94,29 +94,30 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     const requested = args.requested_workshop as string | null | undefined;
     const selected = data.workshops.find(item => item.id === requested) ?? data.workshops[0] ?? null;
     const students = selected ? data.students.filter(item => item.workshop_id === selected.id).sort((a, b) => a.name.localeCompare(b.name, 'zh-TW')) : [];
-    return { workshops: data.workshops, selected, students, thresholds: selected ? thresholds(students) : [] } as T;
+    return { workshops: data.workshops, selected, students, thresholds: selected ? thresholds(students, selected.stations) : [] } as T;
   }
   if (name === 'nptc_student_data') {
     const records = data.students.filter(item => item.email === user.email).map(student => {
       const workshop = data.workshops.find(item => item.id === student.workshop_id)!;
-      const published = workshop.published;
+      const visibleStations = workshop.stations.filter((station) => (workshop.publishedStations ?? (workshop.published ? workshop.stations.map((item) => item.key) : [])).includes(station.key));
+      const published = visibleStations.length ? 1 : 0;
       return {
         id: student.id, name: student.name, email: student.email, phone: student.phone, workshopName: workshop.name, published,
         profile: { nursingYears: student.nursing_years ?? null, hospital: student.hospital ?? '', unit: student.unit ?? '', examSpecialty: student.exam_specialty ?? '', firstOsce: student.first_osce ?? null, birthDate: student.birth_date ?? '' },
-        stations: published ? workshop.stations : [],
+        stations: visibleStations,
         updatedAt: published ? student.updated_at : null,
-        grades: published ? STATIONS.map(({ key }) => ({ key, score: student[`${key}_score`], rating: student[`${key}_rating`], feedback: student[`${key}_feedback`] })) : [],
-        thresholds: published ? thresholds(data.students.filter(item => item.workshop_id === workshop.id)) : [],
+        grades: published ? visibleStations.map(({ key }) => ({ key, score: student[`${key}_score`] ?? null, rating: student[`${key}_rating`] ?? null, feedback: student[`${key}_feedback`] ?? '' })) : [],
+        thresholds: published ? thresholds(data.students.filter(item => item.workshop_id === workshop.id), visibleStations) : [],
       };
     });
     return { records } as T;
   }
-  if (name === 'nptc_teacher_batch_scores') {
+  if (name === 'nptc_teacher_batch_scores' || name === 'nptc_teacher_batch_scores_v2') {
     const teacher = requireTeacher();
     const body = args.body as { workshopId?: string; station?: string; items?: Array<{ id: string; revision: number; score: number | null; rating: number | null; feedback: string }> };
     const workshop = data.workshops.find((item) => item.id === body.workshopId);
     if (!workshop || workshop.published) throw new Error('請先撤回公布，再修改成績。');
-    if (!STATIONS.some((item) => item.key === body.station) || !body.items?.length) throw new Error('請選擇題目與至少一位學員。');
+    if (!workshop.stations.some((item) => item.key === body.station) || !body.items?.length) throw new Error('請選擇題目與至少一位學員。');
     for (const item of body.items) {
       const student = data.students.find((value) => value.id === item.id && value.workshop_id === workshop.id);
       if (!student || student.revision !== item.revision) throw new Error('資料已更新，請重新載入後再編輯。');
@@ -133,7 +134,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     data.students.filter((student) => student.email === user.email).forEach((student) => Object.assign(student, { nursing_years: body.nursingYears, hospital: body.hospital!.trim(), unit: body.unit!.trim(), exam_specialty: body.examSpecialty!.trim(), first_osce: body.firstOsce, birth_date: body.birthDate }));
     save(data); return { ok: true } as T;
   }
-  if (name !== 'nptc_teacher_write') throw new Error('不支援的展示資料操作。');
+  if (name !== 'nptc_teacher_write' && name !== 'nptc_teacher_save_stations' && name !== 'nptc_teacher_publish_station') throw new Error('不支援的展示資料操作。');
   const teacher = requireTeacher();
   const body = args.body as Record<string, unknown>;
   const action = body.action as string;
@@ -146,7 +147,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   if (!workshop) throw new Error('找不到此梯次。');
   if (action === 'publish') {
     const published = Boolean(body.published);
-    if (published && !data.students.some(item => item.workshop_id === workshop.id && STATIONS.some(({ key }) => item[`${key}_score`] !== null))) throw new Error('至少登錄一筆成績後才能公布。');
+    if (published && !data.students.some(item => item.workshop_id === workshop.id && workshop.stations.some(({ key }) => item[`${key}_score`] !== null))) throw new Error('至少登錄一筆成績後才能公布。');
     workshop.published = published ? 1 : 0; save(data); return { ok: true } as T;
   }
   if (workshop.published) throw new Error('請先撤回公布，再修改名冊或成績。');
@@ -156,15 +157,15 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   if (action === 'deleteStudent') { data.students = data.students.filter(item => item !== current); save(data); return { ok: true } as T; }
   if (action === 'saveStations') {
     const stations = body.stations as StationDefinition[];
-    if (!Array.isArray(stations) || stations.length !== STATIONS.length) throw new Error('請完整填寫四題題目資料。');
-    workshop.stations = STATIONS.map(station => {
-      const input = stations.find(item => item?.key === station.key);
-      const title = String(input?.title ?? '').trim();
-      const prompt = String(input?.prompt ?? '').trim();
-      if (!title) throw new Error('每一題都要填寫題目名稱。');
-      return { ...station, title, prompt };
-    });
+    if (!Array.isArray(stations) || !stations.length) throw new Error('請至少新增一題 OSCE 題目。');
+    workshop.stations = stations.map((station, index) => { const title = String(station?.title ?? '').trim(), testDate = String(station?.testDate ?? ''), complaint = String(station?.complaint ?? '').trim(), diagnosis = String(station?.diagnosis ?? '').trim(), prompt = String(station?.prompt ?? '').trim(); if (!station?.key || !title || !testDate || !complaint || !diagnosis || !prompt) throw new Error('每題都必須完成題目名稱、測驗日期、個案主訴、最終診斷與命題內容摘要。'); return { key: String(station.key), title, testDate, complaint, diagnosis, prompt }; });
     save(data); return { ok: true } as T;
+  }
+  if (action === 'publishStation') {
+    const station = String(body.station ?? ''); const published = Boolean(body.published);
+    if (!workshop.stations.some((item) => item.key === station)) throw new Error('找不到指定題目。');
+    if (published && !data.students.some((item) => item.workshop_id === workshop.id && item[`${station}_score`] !== null && item[`${station}_score`] !== undefined)) throw new Error('本題至少要有一筆已登錄成績才能公布。');
+    const visible = new Set(workshop.publishedStations ?? []); published ? visible.add(station) : visible.delete(station); workshop.publishedStations = [...visible]; save(data); return { ok: true } as T;
   }
   if (action === 'bulkImportStudents') {
     const rows = body.students as Array<{ name?: string; email?: string; phone?: string }>;

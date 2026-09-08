@@ -35,7 +35,7 @@ node node_modules/vite/bin/vite.js preview --host 127.0.0.1
 
 在對應專案的 SQL Editor 執行 `supabase/setup.sql`。老師信箱已設定為 `chin.wei.chang0923@gmail.com`。
 
-若已執行過初版設定，依序執行 `supabase/upgrade-workshop-management.sql`、`supabase/upgrade-score-feedback.sql`、`supabase/upgrade-student-phone.sql` 與 `supabase/upgrade-student-profile.sql`。最後兩份腳本會將名冊登入資訊改為姓名、Email、手機電話，並新增學員首次登入的個人資料欄位。
+若已執行過初版設定，依序執行 `supabase/upgrade-workshop-management.sql`、`supabase/upgrade-score-feedback.sql`、`supabase/upgrade-student-phone.sql`、`supabase/upgrade-student-profile.sql` 與 `supabase/upgrade-dynamic-osce-stations.sql`。最後一份腳本將 OSCE 題目與成績改為不限題數，並支援逐題公布。
 
 - 啟用 Email 驗證登入與註冊，並設定可寄信的 SMTP。自架 Supabase 的環境設定需在 Zeabur 修改。
 - 將 Site URL 設定為正式前端網址，Redirect URLs 加入正式網址 `/student/` 與 `/teacher/`，本機測試另加入 `http://127.0.0.1:5173/student/` 與 `/teacher/`。
@@ -54,7 +54,7 @@ node node_modules/vite/bin/vite.js preview --host 127.0.0.1
 
 每題分數 0–100，Rating 為 1–5 整數；兩欄成對填寫或留空。固定及格線 60 分。邊緣及格分數為該梯次 Rating=3 的平均。公布後禁止修改，撤回後才能編輯；revision 防止覆寫新版資料，梯次鎖防止公布與修改互相競爭。
 
-每個梯次另有四站題目設定：第一天兩題、第二天兩題，分別可記錄題目名稱與命題內容。名冊可由 Excel 貼上「姓名、Email、手機電話」三欄批次匯入；名冊中的手機電話會遮蔽顯示。學員只能查看自己的已公布成績與各站邊緣及格分數。
+每個梯次可新增不限數量的 OSCE 題目；每題記錄題目名稱、測驗日期、個案主訴、最終診斷與命題內容摘要。名冊可由 Excel 貼上「姓名、Email、手機電話」三欄批次匯入；名冊中的手機電話會遮蔽顯示。老師可以逐題公布或撤回成績，學員只能查看已公布題目的個人成績與邊緣及格分數。
 
 服務醫院以政府開放資料的「衛生福利部評鑑合格之醫院名單」提供搜尋選取；每次 GitHub Pages 部署及每日排程建置時，都會重新擷取公開 JSON，產生網站可讀取的快取名冊。前端只可點選完整院名，不能自行輸入。
 
