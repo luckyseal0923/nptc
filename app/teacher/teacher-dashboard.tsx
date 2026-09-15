@@ -1,3 +1,5 @@
+import { RosterSortSelect } from '@/components/roster-sort-select';
+import { sortRoster, type RosterSort } from '@/lib/roster-sort';
 import { RosterStudentName } from '@/components/roster-student';
 import { rpc } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
@@ -13,6 +15,8 @@ type Data = { workshops: Workshop[]; selected: Workshop | null; students: Studen
 
 export default function TeacherDashboard() {
   const [data, setData] = useState<Data | null>(null);
+  const [rosterSort, setRosterSort] = useState<RosterSort>('original');
+  const sortedRoster = sortRoster(data?.students ?? [], rosterSort);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -142,7 +146,7 @@ export default function TeacherDashboard() {
           </section>
         </div>
         <section className="data-panel roster-current"><div className="panel-heading"><div><span className="section-label">CURRENT ROSTER</span><h2>目前學員名冊</h2></div><div className="flex items-center gap-3"><span>{data.students.length} 位學員</span><Button className="action small secondary" disabled={busy} onClick={() => changeWorkshop(data.selected!.id)}>重新整理</Button></div></div>
-          {data.students.length ? <Table><TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell><RosterStudentName student={student} /></TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
+          {data.students.length ? <Table><TableHeader><TableRow><TableHead><RosterSortSelect value={rosterSort} onChange={setRosterSort} /></TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{sortedRoster.map((student) => <TableRow key={student.id}><TableCell><RosterStudentName student={student} /></TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
         </section>
       </TabsContent>
 
