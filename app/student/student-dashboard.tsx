@@ -1,3 +1,4 @@
+import { DomainRadar } from '@/components/domain-radar';
 import { rpc } from '@/lib/supabase';
 ('use client');
 import { useEffect, useState } from 'react';
@@ -193,48 +194,56 @@ export default function StudentDashboard({
                               {status}
                             </span>
                           </div>
-                          <div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}>
-                            {formatScore(score)}
-                            <span> / 100</span>
+                          <section className="score-question-content" aria-label="考題內容">
+                            <h4>考題內容</h4>
+                            <dl className="score-case-details">
+                              {station.complaint && <div><dt>個案主訴</dt><dd>{station.complaint}</dd></div>}
+                              {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
+                              {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
+                            </dl>
+                          </section>
+                          <div className="score-performance-grid">
+                            <section className="score-overview" aria-label="成績摘要">
+                              <div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}>
+                                {formatScore(score)}
+                                <span> / 100</span>
+                              </div>
+                              <div
+                                className="score-track"
+                                aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
+                              >
+                                <div
+                                  className="score-fill"
+                                  style={{ width: `${score ?? 0}%` }}
+                                />
+                                {t?.value !== null && t?.value !== undefined && (
+                                  <i
+                                    className="border-marker"
+                                    style={{ left: `${t.value}%` }}
+                                  />
+                                )}
+                              </div>
+                              <div className="track-labels">
+                                <span>0</span>
+                                <span>100</span>
+                              </div>
+                              <dl className="grade-details">
+                                <div>
+                                  <dt>邊緣及格分數</dt>
+                                  <dd>
+                                    {t?.value === null || t?.value === undefined
+                                      ? '尚無法計算'
+                                      : `${formatScore(t.value)} 分`}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Global Rating</dt>
+                                  <dd>{g?.rating ?? '—'} / 5</dd>
+                                </div>
+                              </dl>
+                            </section>
+                            <DomainRadar title="五大面向表現" scores={g?.domains} maximum={station.domainMax}/>
                           </div>
-                          <div
-                            className="score-track"
-                            aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
-                          >
-                            <div
-                              className="score-fill"
-                              style={{ width: `${score ?? 0}%` }}
-                            />
-                            {t?.value !== null && t?.value !== undefined && (
-                              <i
-                                className="border-marker"
-                                style={{ left: `${t.value}%` }}
-                              />
-                            )}
-                          </div>
-                          <div className="track-labels">
-                            <span>0</span>
-                            <span>100</span>
-                          </div>
-                          <dl className="grade-details">
-                            <div>
-                              <dt>邊緣及格分數</dt>
-                              <dd>
-                                {t?.value === null || t?.value === undefined
-                                  ? '尚無法計算'
-                                  : `${formatScore(t.value)} 分`}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Global Rating</dt>
-                              <dd>{g?.rating ?? '—'} / 5</dd>
-                            </div>
-                          </dl>
-                          <dl className="score-case-details">
-                            {station.complaint && <div><dt>個案主訴</dt><dd>{station.complaint}</dd></div>}
-                            {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
-                            {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
-                          </dl>
                           {g?.feedback && (
                             <div className="qualitative-feedback">
                               <strong>老師回饋</strong>

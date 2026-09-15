@@ -1,9 +1,10 @@
+import type { DomainValues } from './domains';
 export type AnalysisStudent = { id: string; name: string; email: string; workshop_id: string; [key: string]: unknown };
-export type AnalysisStation = { key: string; title: string; testDate?: string };
+export type AnalysisStation = { key: string; title: string; testDate?: string; domainMax?: DomainValues };
 export type AnalysisWorkshop = { id: string; name: string; created_at: string; stations?: AnalysisStation[] };
 export type AnalysisData = { workshops: AnalysisWorkshop[]; selected: AnalysisWorkshop | null; students: AnalysisStudent[]; thresholds: { key: string; value: number | null; count: number }[] };
 export type Enrollment = { student: AnalysisStudent; workshop: AnalysisWorkshop; exams: Exam[]; identity: string };
-export type Exam = { key: string; title: string; date: string; workshopId: string; workshopName: string; score: number | null; rating: number | null; threshold: number | null; feedback: string };
+export type Exam = { key: string; title: string; date: string; workshopId: string; workshopName: string; score: number | null; rating: number | null; threshold: number | null; feedback: string; domains?: unknown; domainMax?: DomainValues };
 export type Dimension = 'hospital' | 'unit' | 'exam_specialty' | 'nursing_years' | 'first_osce';
 export const dimensions: [Dimension, string][] = [['exam_specialty','報考科別'],['nursing_years','護理年資'],['hospital','服務醫院'],['unit','服務單位'],['first_osce','首次報考 OSCE']];
 export const numeric = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -19,7 +20,7 @@ export function enrollments(data: AnalysisData[]): Enrollment[] {
     if (!d.selected) return [];
     const workshop = d.selected;
     return d.students.map(student => ({ student, workshop, identity: identityKey(student), exams: (workshop.stations ?? []).map(station => ({
-      key: station.key, title: station.title || '未命名題目', date: station.testDate ?? '', workshopId: workshop.id, workshopName: workshop.name,
+      domains: student[`${station.key}_domains`], domainMax: station.domainMax, key: station.key, title: station.title || '未命名題目', date: station.testDate ?? '', workshopId: workshop.id, workshopName: workshop.name,
       score: numeric(student[`${station.key}_score`]), rating: numeric(student[`${station.key}_rating`]),
       threshold: numeric(d.thresholds.find(t => t.key === station.key)?.value), feedback: typeof student[`${station.key}_feedback`] === 'string' ? student[`${station.key}_feedback`] as string : '',
     })) }));

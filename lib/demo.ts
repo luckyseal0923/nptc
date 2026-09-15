@@ -1,3 +1,4 @@
+import { domainTotal, validateDomainMax, validateDomainScores, type DomainValues } from './domains';
 import { computeThreshold, DEFAULT_STATIONS, type StationDefinition } from './grading';
 
 // 正式模式：所有名冊、題目與成績都由 Supabase 儲存。
@@ -6,7 +7,7 @@ export const DEMO_MODE = false;
 type DemoRole = 'teacher' | 'student';
 type DemoUser = { role: DemoRole; username: string; email: string };
 type Workshop = { id: string; name: string; published: number; publishedStations?: string[]; created_at: string; stations: StationDefinition[] };
-type Student = Record<string, string | number | null> & {
+type Student = Record<string, unknown> & {
   id: string;
   workshop_id: string;
   name: string;
@@ -107,24 +108,29 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
         profile: { nursingYears: student.nursing_years ?? null, hospital: student.hospital ?? '', unit: student.unit ?? '', examSpecialty: student.exam_specialty ?? '', firstOsce: student.first_osce ?? null, birthDate: student.birth_date ?? '' },
         stations: visibleStations,
         updatedAt: published ? student.updated_at : null,
-        grades: published ? visibleStations.map(({ key }) => ({ key, score: student[`${key}_score`] ?? null, rating: student[`${key}_rating`] ?? null, feedback: student[`${key}_feedback`] ?? '' })) : [],
+        grades: published ? visibleStations.map(({ key }) => ({ key, score: student[`${key}_score`] ?? null, rating: student[`${key}_rating`] ?? null, feedback: student[`${key}_feedback`] ?? '', domains: student[`${key}_domains`] ?? null })) : [],
         thresholds: published ? thresholds(data.students.filter(item => item.workshop_id === workshop.id), visibleStations) : [],
       };
     });
     return { records } as T;
   }
-  if (name === 'nptc_teacher_batch_scores' || name === 'nptc_teacher_batch_scores_v2') {
+  if (name === 'nptc_teacher_batch_scores' || name === 'nptc_teacher_batch_scores_v2' || name === 'nptc_teacher_batch_scores_v3') {
     const teacher = requireTeacher();
-    const body = args.body as { workshopId?: string; station?: string; items?: Array<{ id: string; revision: number; score: number | null; rating: number | null; feedback: string }> };
+    const body = args.body as { workshopId?: string; station?: string; items?: Array<{ id: string; revision: number; score: number | null; rating: number | null; feedback: string; domains?: DomainValues | null }> };
     const workshop = data.workshops.find((item) => item.id === body.workshopId);
     if (!workshop || workshop.published) throw new Error('請先撤回公布，再修改成績。');
     if (!workshop.stations.some((item) => item.key === body.station) || !body.items?.length) throw new Error('請選擇題目與至少一位學員。');
+    const definition=workshop.stations.find(item=>item.key===body.station)!;
+    if(workshop.publishedStations?.includes(definition.key))throw new Error('請先撤回本題公告。');
+    validateDomainMax(definition.domainMax);
     for (const item of body.items) {
+      if(item.domains===undefined)throw new Error('請使用五面向成績表。');
+      item.score=item.domains===null ? null : domainTotal(validateDomainScores(item.domains,definition.domainMax));
       const student = data.students.find((value) => value.id === item.id && value.workshop_id === workshop.id);
       if (!student || student.revision !== item.revision) throw new Error('資料已更新，請重新載入後再編輯。');
       if ((item.score === null) !== (item.rating === null) || (item.score !== null && (!Number.isFinite(item.score) || item.score < 0 || item.score > 100 || !Number.isInteger(item.rating) || item.rating! < 1 || item.rating! > 5))) throw new Error('分數與 Global Rating 請成對填寫，分數為 0–100、Rating 為 1–5。');
       if (item.feedback.length > 500) throw new Error('質性回饋最多 500 字。');
-      student[`${body.station}_score`] = item.score; student[`${body.station}_rating`] = item.rating; student[`${body.station}_feedback`] = item.feedback;
+      student[`${body.station}_domains`] = item.domains; student[`${body.station}_score`] = item.score; student[`${body.station}_rating`] = item.rating; student[`${body.station}_feedback`] = item.feedback;
       student.revision += 1; student.updated_at = new Date().toISOString(); student.updated_by = teacher.email;
     }
     save(data); return { ok: true } as T;
@@ -135,7 +141,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     data.students.filter((student) => student.email === user.email).forEach((student) => Object.assign(student, { nursing_years: body.nursingYears, hospital: body.hospital!.trim(), unit: body.unit!.trim(), exam_specialty: body.examSpecialty!.trim(), first_osce: body.firstOsce, birth_date: body.birthDate }));
     save(data); return { ok: true } as T;
   }
-  if (name !== 'nptc_teacher_write' && name !== 'nptc_teacher_save_stations' && name !== 'nptc_teacher_publish_station') throw new Error('不支援的展示資料操作。');
+  if (name !== 'nptc_teacher_write' && name !== 'nptc_teacher_save_stations' && name !== 'nptc_teacher_save_stations_v3' && name !== 'nptc_teacher_publish_station') throw new Error('不支援的展示資料操作。');
   const teacher = requireTeacher();
   const body = args.body as Record<string, unknown>;
   const action = body.action as string;
@@ -159,7 +165,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   if (action === 'saveStations') {
     const stations = body.stations as StationDefinition[];
     if (!Array.isArray(stations) || !stations.length) throw new Error('請至少新增一題 OSCE 題目。');
-    workshop.stations = stations.map((station, index) => { const title = String(station?.title ?? '').trim(), testDate = String(station?.testDate ?? ''), complaint = String(station?.complaint ?? '').trim(), diagnosis = String(station?.diagnosis ?? '').trim(), prompt = String(station?.prompt ?? '').trim(); if (!station?.key || !title || !testDate || !complaint || !diagnosis || !prompt) throw new Error('每題都必須完成題目名稱、測驗日期、個案主訴、最終診斷與命題內容摘要。'); return { key: String(station.key), title, testDate, complaint, diagnosis, prompt }; });
+    workshop.stations = stations.map((station, index) => { const title = String(station?.title ?? '').trim(), testDate = String(station?.testDate ?? ''), complaint = String(station?.complaint ?? '').trim(), diagnosis = String(station?.diagnosis ?? '').trim(), prompt = String(station?.prompt ?? '').trim(); if (!station?.key || !title || !testDate || !complaint || !diagnosis || !prompt) throw new Error('每題都必須完成題目名稱、測驗日期、個案主訴、最終診斷與命題內容摘要。'); const previous=workshop.stations.find(s=>s.key===station.key); const domainMax=station.domainMax ? validateDomainMax(station.domainMax) : undefined; if(!domainMax && (!previous?.title || previous.domainMax))throw new Error('請填寫五面向滿分。'); if(JSON.stringify(previous?.domainMax)!==JSON.stringify(domainMax) && data.students.some(s=>s.workshop_id===workshop.id && s[`${station.key}_domains`]))throw new Error('已有分項成績，不能變更配分。'); return { key: String(station.key), title, testDate, complaint, diagnosis, prompt, ...(domainMax ? {domainMax} : {}) }; });
     save(data); return { ok: true } as T;
   }
   if (action === 'publishStation') {
