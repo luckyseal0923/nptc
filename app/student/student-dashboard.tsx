@@ -155,15 +155,15 @@ export default function StudentDashboard({
                   </strong>
                 </div>
                 <div>
-                  <span>每題固定及格線</span>
+                  <span>各題及格標準</span>
                   <strong>
-                    60<small> / 100</small>
+                    邊緣及格分數
                   </strong>
                 </div>
                 <p>
-                  及格狀態以固定 60 分判定。
+                  各題得分達該題邊緣及格分數即為及格，未達者以紅字顯示。
                   <br />
-                  邊緣及格分數為各題 Rating＝3 學員的平均分數，另列供參考。
+                  邊緣及格分數為各題 Rating＝3 學員的平均分數；缺少資料時尚無法判定。
                 </p>
               </div>
               <section className="borderline-explainer" aria-label="邊緣及格分數說明">
@@ -171,8 +171,8 @@ export default function StudentDashboard({
                   <span className="section-label">ABOUT BORDERLINE SCORE</span>
                   <h2>什麼是邊緣及格分數？</h2>
                 </div>
-                <p>每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。其中 Rating＝3 代表考官認為學員的表現剛好達到通過國家考試的程度；系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。</p>
-                <p><strong>它用來幫助你理解自己的表現與考官判斷的基準。</strong> 本系統的正式及格判定仍以固定 60 分為準；邊緣及格分數只供學習與回饋參考。</p>
+                <p>每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。本工作坊以 Rating＝3 代表邊緣表現；系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。</p>
+                <p><strong>它用來幫助你理解自己的表現與考官判斷的基準。</strong> 本系統以每題的邊緣及格分數判斷及格；得分等於或高於該分數即為及格。</p>
               </section>
               <section className="day-section">
                 <div className="day-heading"><span>OSCE RESULTS</span><h2>已公布的 OSCE 成績</h2></div>
@@ -181,15 +181,16 @@ export default function StudentDashboard({
                       const g = record.grades.find((g) => g.key === station.key),
                         score = g?.score ?? null,
                         t = record.thresholds.find((t) => t.key === station.key);
+                      const status = gradeStatus(score, t?.value ?? null);
                       return (
                         <article className="student-score-card" key={station.key}>
                           <div className="score-card-heading">
                             <div><h3>{station.title}</h3>
                             {station.testDate && <p className="score-test-date">測驗日期 <time dateTime={station.testDate}>{station.testDate}</time></p>}</div>
                             <span
-                              className={`result-badge ${score === null ? 'pending' : score >= 60 ? 'pass' : 'below'}`}
+                              className={`result-badge ${status === '及格' ? 'pass' : status === '未達及格' ? 'below' : 'pending'}`}
                             >
-                              {gradeStatus(score)}
+                              {status}
                             </span>
                           </div>
                           <dl className="score-case-details">
@@ -197,21 +198,17 @@ export default function StudentDashboard({
                             {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
                             {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
                           </dl>
-                          <div className={`personal-score${score !== null && score < 60 ? ' score-failed' : ''}`}>
+                          <div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}>
                             {formatScore(score)}
                             <span> / 100</span>
                           </div>
                           <div
                             className="score-track"
-                            aria-label={`個人成績 ${formatScore(score)} 分，及格線 60 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
+                            aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
                           >
                             <div
                               className="score-fill"
                               style={{ width: `${score ?? 0}%` }}
-                            />
-                            <i
-                              className="pass-marker"
-                              style={{ left: '60%' }}
                             />
                             {t?.value !== null && t?.value !== undefined && (
                               <i
@@ -225,10 +222,6 @@ export default function StudentDashboard({
                             <span>100</span>
                           </div>
                           <dl className="grade-details">
-                            <div>
-                              <dt>固定及格分數</dt>
-                              <dd>60 分</dd>
-                            </div>
                             <div>
                               <dt>邊緣及格分數</dt>
                               <dd>
@@ -259,10 +252,6 @@ export default function StudentDashboard({
                 </div>
               </section>
               <div className="score-legend">
-                <span>
-                  <i className="legend-fixed" />
-                  固定及格線 60 分
-                </span>
                 <span>
                   <i className="legend-border" />
                   邊緣及格線

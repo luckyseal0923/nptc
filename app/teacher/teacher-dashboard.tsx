@@ -155,7 +155,7 @@ export default function TeacherDashboard() {
       </TabsContent>
 
       <TabsContent value="scores">
-        <section className="workflow-intro"><strong>第三步：選擇一站，再登錄該站成績</strong><span>固定及格線為 60 分；邊緣及格線取 Global Rating＝3 的平均。</span></section>
+        <section className="workflow-intro"><strong>第三步：選擇一站，再登錄該站成績</strong><span>每題以邊緣及格分數判定及格，取該題 Global Rating＝3 的平均；無資料時尚無法判定。</span></section>
         <div className="station-picker">{stations.map((station) => {
           const threshold = data.thresholds.find((item) => item.key === station.key);
           return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}><span>{station.testDate || '尚未設定測驗日期'}</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;

@@ -1,17 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradeStatus, computeThreshold, formatScore, validateGrade, PASS_SCORE } from '../lib/grading.ts';
+import { gradeStatus, computeThreshold, formatScore, validateGrade } from '../lib/grading.ts';
 
-test('PASS_SCORE should be 60', () => {
-  assert.equal(PASS_SCORE, 60);
-});
-
-test('gradeStatus returns correct status', () => {
-  assert.equal(gradeStatus(null), '尚未登錄');
-  assert.equal(gradeStatus(60), '及格');
-  assert.equal(gradeStatus(85.5), '及格');
-  assert.equal(gradeStatus(59.9), '未達及格');
-  assert.equal(gradeStatus(0), '未達及格');
+test('gradeStatus uses each station borderline threshold without rounding', () => {
+  assert.equal(gradeStatus(null, 64.4), '尚未登錄');
+  assert.equal(gradeStatus(90, null), '尚無法判定');
+  assert.equal(gradeStatus(64.4, 64.4), '及格');
+  assert.equal(gradeStatus(85.5, 64.4), '及格');
+  assert.equal(gradeStatus(60, 64.4), '未達及格');
+  assert.equal(gradeStatus(59, 58), '及格');
+  assert.equal(gradeStatus(0, 0), '及格');
+  assert.equal(gradeStatus(64.444, 64.4444), '未達及格');
 });
 
 test('formatScore formats numbers properly', () => {
