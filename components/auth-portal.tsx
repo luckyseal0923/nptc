@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import TeacherDashboard from '@/app/teacher/teacher-dashboard';
+import { BackendWorkspace } from '@/components/backend-workspace';
 import StudentDashboard from '@/app/student/student-dashboard';
-import { BackendApplication, BackendAccounts } from '@/components/backend-accounts';
+import { BackendApplication } from '@/components/backend-accounts';
 import { BackendLogin } from '@/components/backend-login';
 import { StudentLogin, StudentActivation, ResetStudentPassword, type Onboarding } from '@/components/student-access';
 import { DEMO_MODE, demoUser } from '@/lib/demo';
@@ -46,7 +46,7 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
     : !user ? <>{recovery && <p className="p-4 text-center" role="alert">請開啟最新的重設密碼信件；連結失效時可重新申請。</p>}{!DEMO_MODE ? (teacher ? <BackendLogin /> : <StudentLogin />) : <LoginPanel teacher={teacher} />}</>
     : recovery ? <ResetStudentPassword teacher={teacher} onComplete={() => { setRecovery(false); reload(); }} />
     : teacher && user.role !== 'teacher' ? <BackendApplication email={user.email} />
-    : teacher ? <div className="workspace"><BackendAccounts /><TeacherDashboard /></div>
+    : teacher ? <BackendWorkspace key={user.email} />
     : !DEMO_MODE && user.role !== 'teacher' && status?.stage !== 'active' ? <StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} />
     : <div className="workspace"><StudentDashboard isTeacher={user.role === 'teacher'} /></div>}
   </PortalShell>;

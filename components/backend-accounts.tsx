@@ -42,10 +42,10 @@ export function BackendApplication({ email }: { email: string }) {
   </div></section>;
 }
 
-export function BackendAccounts() {
+export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
   const [canReview, setCanReview] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(expanded);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   async function load() {
