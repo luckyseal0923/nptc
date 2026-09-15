@@ -1,4 +1,4 @@
-import { computeThreshold, DEFAULT_STATIONS, STATIONS, type StationDefinition } from './grading';
+import { computeThreshold, DEFAULT_STATIONS, type StationDefinition } from './grading';
 
 export const DEMO_MODE = true;
 
@@ -33,10 +33,10 @@ function initialState(): State {
   const now = new Date().toISOString();
   return {
     workshops: [{ id: 'demo-workshop', name: '示範 OSCE 班', published: 0, publishedStations: ['q1','q2','q3','q4'], created_at: now, stations: [
-      { ...DEFAULT_STATIONS[0], title: '初步評估與處置', testDate: '2026-09-01', complaint: '胸痛', diagnosis: '急性冠心症', prompt: '依個案主訴完成初步評估、臨床推理與處置說明。' },
-      { ...DEFAULT_STATIONS[1], title: '溝通與衛教', testDate: '2026-09-01', complaint: '胸痛', diagnosis: '急性冠心症', prompt: '以病人可理解的方式說明評估結果與後續處置。' },
-      { ...DEFAULT_STATIONS[2], title: '病況辨識', testDate: '2026-09-02', complaint: '呼吸困難', diagnosis: '肺炎', prompt: '辨識關鍵臨床線索，提出優先處置與追蹤計畫。' },
-      { ...DEFAULT_STATIONS[3], title: '整合照護', testDate: '2026-09-02', complaint: '發燒', diagnosis: '敗血症', prompt: '整合病史、檢查與照護需求，完成臨床決策。' },
+      { key: 'q1', title: '初步評估與處置', testDate: '2026-09-01', complaint: '胸痛', diagnosis: '急性冠心症', prompt: '依個案主訴完成初步評估、臨床推理與處置說明。' },
+      { key: 'q2', title: '溝通與衛教', testDate: '2026-09-01', complaint: '胸痛', diagnosis: '急性冠心症', prompt: '以病人可理解的方式說明評估結果與後續處置。' },
+      { key: 'q3', title: '病況辨識', testDate: '2026-09-02', complaint: '呼吸困難', diagnosis: '肺炎', prompt: '辨識關鍵臨床線索，提出優先處置與追蹤計畫。' },
+      { key: 'q4', title: '整合照護', testDate: '2026-09-02', complaint: '發燒', diagnosis: '敗血症', prompt: '整合病史、檢查與照護需求，完成臨床決策。' },
     ] }],
     students: [{
       id: 'demo-student', workshop_id: 'demo-workshop', name: '示範學員', email: accounts.student.email,
@@ -192,7 +192,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   }
   if (action === 'saveScores' && current) {
     const grades = body.grades as Record<string, { score: number | null; rating: number | null }>;
-    for (const { key } of STATIONS) { current[`${key}_score`] = grades[key].score; current[`${key}_rating`] = grades[key].rating; }
+    for (const { key } of workshop.stations) { current[`${key}_score`] = grades[key].score; current[`${key}_rating`] = grades[key].rating; }
     current.revision += 1; current.updated_at = now; current.updated_by = teacher.email; save(data); return { ok: true } as T;
   }
   throw new Error('不支援的操作。');

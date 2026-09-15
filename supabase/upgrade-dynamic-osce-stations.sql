@@ -2,6 +2,7 @@
 begin;
 
 alter table nptc_private.workshops add column if not exists published_stations jsonb not null default '[]'::jsonb;
+alter table nptc_private.workshops alter column stations set default '[{"key":"q1","title":"","testDate":"","complaint":"","diagnosis":"","prompt":""}]'::jsonb;
 create table if not exists nptc_private.station_grades (
  student_id uuid not null references nptc_private.students(id) on delete cascade,
  station_key text not null check(length(station_key) between 1 and 100),
