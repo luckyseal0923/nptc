@@ -15,7 +15,7 @@ Deno.serve(async (request: Request) => {
    typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 128) return reply(400, '請完整填寫有效資料與至少八個字元的密碼。');
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await admin.rpc('nptc_consume_student_invitation', { body: { name: body.name.trim(), email: body.email.trim().toLowerCase(), phone: body.phone, code: body.code } });
-  if (error) return reply(503, '啟用服務暫時無法使用，請聯絡管理員。');
+  if (error) { console.error('Invitation RPC failed:', error.code, error.message); return reply(503, '啟用服務暫時無法使用，請聯絡管理員。'); }
   if (!data?.ok) return reply(400, '資料或啟用碼不符、已過期，或此帳號已存在。請確認或聯絡管理員。');
   // 僅建立新帳號；絕不覆寫既有帳號密碼或管理員權限。
   const { error: createError } = await admin.auth.admin.createUser({ email: data.email, password: body.password, email_confirm: true });
