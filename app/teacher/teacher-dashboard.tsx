@@ -13,8 +13,9 @@ import { formatScore, maskPhone, validateGrade, workshopStations, type Student, 
 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
 
-export default function TeacherDashboard() {
+export default function TeacherDashboard({ onWorkshopChange }: { onWorkshopChange?: (id: string) => void } = {}) {
   const [data, setData] = useState<Data | null>(null);
+  useEffect(() => { if (data?.selected?.id) onWorkshopChange?.(data.selected.id); }, [data?.selected?.id, onWorkshopChange]);
   const [rosterSort, setRosterSort] = useState<RosterSort>('original');
   const sortedRoster = sortRoster(data?.students ?? [], rosterSort);
   const [busy, setBusy] = useState(false);
