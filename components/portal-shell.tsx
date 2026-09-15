@@ -32,7 +32,7 @@ export function PortalShell({
           <button type="button" className="rounded border px-3 py-2 lg:hidden" aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>選單</button>
           <nav id="portal-navigation" aria-label="網站導覽" className={`${menuOpen ? 'flex' : 'hidden'} w-full flex-col items-start gap-5 text-sm font-medium lg:flex lg:w-auto lg:flex-row lg:items-center`}>
             <div id="backend-navigation" className="flex flex-col gap-5 lg:flex-row lg:items-center" />
-            {teacher ? <Link href="/student/">學員專區</Link> : <Link href="/teacher/">後臺管理系統</Link>}
+            {teacher && <Link href="/student/">學員專區</Link>}
             <Link href="/">課程首頁</Link>
             {email && (
               <button
