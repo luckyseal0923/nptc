@@ -15,10 +15,11 @@ export function PortalShell({
   email?: string;
   teacher?: boolean;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <main className="min-h-screen bg-[#f8faf7] text-[#133b38]">
       <header className="border-b border-[#dbe4dc] bg-white/90">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-5">
           <Link href="/" className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-full bg-[#123f3a] text-[#c9ef72]">
               <Activity className="h-6 w-6" />
@@ -28,7 +29,9 @@ export function PortalShell({
               <small className="tracking-[0.22em] text-[#2c6660]">NP ・ OSCE WORKSHOP</small>
             </span>
           </Link>
-          <nav className="flex items-center gap-5 text-sm font-medium">
+          <button type="button" className="rounded border px-3 py-2 lg:hidden" aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>選單</button>
+          <nav id="portal-navigation" aria-label="網站導覽" className={`${menuOpen ? 'flex' : 'hidden'} w-full flex-col items-start gap-5 text-sm font-medium lg:flex lg:w-auto lg:flex-row lg:items-center`}>
+            <div id="backend-navigation" className="flex flex-col gap-5 lg:flex-row lg:items-center" />
             {teacher ? <Link href="/student/">學員專區</Link> : <Link href="/teacher/">後臺管理系統</Link>}
             <Link href="/">課程首頁</Link>
             {email && (
