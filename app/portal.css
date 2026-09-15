@@ -29,3 +29,5 @@
 .student-score-card .score-note{line-height:1.75;color:#65756f}
 @media(max-width:900px){.student-score-grid{grid-template-columns:1fr}}
 @media(max-width:480px){.student-score-card{padding:20px}.student-score-card .score-card-heading h3{font-size:20px}.score-card-heading{gap:10px}.score-case-details{padding:16px}}
+.student-score-card .personal-score.score-failed{color:#b42318}
+.student-score-card .result-badge.below{background:#fff0ee;color:#b42318}

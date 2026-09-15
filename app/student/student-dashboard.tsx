@@ -197,7 +197,7 @@ export default function StudentDashboard({
                             {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
                             {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
                           </dl>
-                          <div className="personal-score">
+                          <div className={`personal-score${score !== null && score < 60 ? ' score-failed' : ''}`}>
                             {formatScore(score)}
                             <span> / 100</span>
                           </div>
