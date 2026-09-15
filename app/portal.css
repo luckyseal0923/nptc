@@ -72,3 +72,11 @@
  .borderline-explainer{padding:20px;gap:14px;margin-bottom:24px}
  .score-batch-form::before{content:"表格可左右滑動，查看分數、評等與回饋";display:block;font-size:13px;color:#536b63;margin-bottom:12px}
 }
+
+/* Keep the workshop selector, metrics and action on the same baseline. */
+.workshop-control-card{align-items:end}
+.workshop-control-card [data-slot=native-select]{height:48px}
+.workshop-summary{align-items:stretch}
+.workshop-summary>span{display:flex;align-items:center;gap:3px;height:48px;box-sizing:border-box}
+.workshop-control-card .create-workshop-button{height:48px;min-height:48px!important}
+@media(max-width:680px){.workshop-control-card{align-items:stretch}}
