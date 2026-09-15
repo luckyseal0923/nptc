@@ -23,7 +23,7 @@
 .score-case-details{display:grid;gap:16px;margin:0;padding:20px;background:#f5f7f2;border-radius:8px}
 .score-question-content{margin:14px 0 18px}.score-question-content h4{font-size:14px;font-weight:700;color:#365e57;margin:0 0 8px}.score-question-content .score-case-details{margin-top:0;grid-template-columns:1fr 1fr;gap:10px 18px;padding:14px 16px}.score-question-content .score-case-details>div:last-child{grid-column:1/-1}.score-performance-grid{display:grid;grid-template-columns:minmax(210px,.8fr) minmax(300px,1.2fr);gap:20px;align-items:center}.score-performance-grid .personal-score{margin:0 0 14px}.score-performance-grid .score-track{margin-top:16px}.score-performance-grid .track-labels{margin-bottom:10px}.score-performance-grid .domain-radar{margin:0;padding:12px}.score-performance-grid .domain-radar figcaption{font-size:14px}.score-performance-grid .domain-radar svg{max-width:400px}
 .score-case-details:empty{display:none}
-.score-case-details dt{font-size:12px;font-weight:700;color:#527166;margin-bottom:5px;letter-spacing:.04em}
+.score-case-details dt{display:inline-block;padding:2px 7px;border-radius:4px;background:#e5eee7;font-size:13px;font-weight:750;color:#174943;margin-bottom:6px;letter-spacing:.03em}
 .score-case-details dd{margin:0;font-size:15px;line-height:1.85;color:#244b43;white-space:pre-wrap;overflow-wrap:anywhere}
 .student-score-card .qualitative-feedback{margin-top:22px;padding:18px 20px}
 .student-score-card .qualitative-feedback strong{display:block;font-size:14px;margin-bottom:8px}
