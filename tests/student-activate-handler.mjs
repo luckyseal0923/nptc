@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
 import assert from 'node:assert/strict';
 let handler, consumed=0, created=0, allow=true, createFail=false;
 const client={rpc:async()=>{consumed++;return {data:{ok:allow,email:'test@example.invalid'},error:null}},auth:{admin:{createUser:async()=>{created++;return {error:createFail?new Error('fail'):null}}}}};
 const source=readFileSync('supabase/functions/student-activate/index.ts','utf8').replace(/^import .*\n/,'');
-vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,{Response,Request,createClient:()=>client,Deno:{env:{get:()=>''},serve:fn=>handler=fn}});
+vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,{Response,Request,TextEncoder,btoa,crypto:webcrypto,createClient:()=>client,Deno:{env:{get:()=>'test-only-shared-secret-at-least-32-characters'},serve:fn=>handler=fn}});
 const body={name:'Test',email:'test@example.invalid',phone:'0912345678',code:'a'.repeat(64),password:'Test-password-123'};
 const post=data=>handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify(data)}));
 assert.equal((await post({...body,password:'short'})).status,400);assert.equal(consumed,0);
