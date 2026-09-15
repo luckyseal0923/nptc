@@ -28,7 +28,7 @@ export default function TeacherDashboard() {
   const selectedThreshold = data?.thresholds.find((item) => item.key === scoreStation);
 
   async function load(id?: string, signal?: AbortSignal) {
-    const result = await rpc<Data>('nptc_teacher_data', { requested_workshop: id ?? null }, signal);
+    const result = await rpc<Data>('nptc_teacher_data', { requested_workshop: id || null }, signal);
     setData(result);
     setEditing(null);
     setStationDrafts(null);
@@ -81,7 +81,7 @@ export default function TeacherDashboard() {
     setTab(next); setEditing(null); setError(''); setMessage('');
   }
 
-  if (!data) return <section className="portal-panel"><p>{error ? '資料載入失敗，請重試。' : '正在載入教學評量資料…'}</p>{error && <Button className="action" onClick={() => changeWorkshop('')}>重新載入</Button>}</section>;
+  if (!data) return <section className="portal-panel"><p>{error ? '課程資料載入失敗' : '正在載入教學評量資料…'}</p>{error && <><p role="alert" className="notice error">{error}</p><Button type="button" disabled={busy} className="action" onClick={() => changeWorkshop('')}>{busy ? '載入中…' : '重新載入'}</Button></>}</section>;
   if (!data.selected) return <section className="empty-panel"><h2>先建立第一個工作坊梯次</h2><p>每個梯次會各自管理名冊、題目、成績與邊緣及格分數。</p></section>;
 
   return <>
