@@ -2,16 +2,16 @@
 
 前端使用 React + Vite，建置結果為 `dist/`，只包含 HTML、CSS、JavaScript 與圖片。正式服務不需要 Node、Cloudflare Worker 或 D1。
 
-## 目前展示登入
+## 目前登入方式
 
-目前先啟用瀏覽器本機展示模式，不需要輸入 Email，也不會寄出驗證信或寫入 Supabase：
+目前採用 Supabase 正式模式。老師與學員均使用 Email 驗證連結登入，老師端新增或匯入的名冊會直接寫入 Supabase。
+
+如要離線展示，可將 `lib/demo.ts` 的 `DEMO_MODE` 改為 `true`；展示模式不會寄出驗證信或寫入 Supabase：
 
 - 老師帳號：`teacher`／`demo1234`
 - 學員帳號：`student`／`demo1234`
 
-展示資料只存在使用者目前瀏覽器的 localStorage。要恢復 Supabase 的 Email 驗證登入，將 `lib/demo.ts` 的 `DEMO_MODE` 改為 `false`，再依下列 Supabase 初始化設定完成 SMTP 與 Redirect URL。
-
-正式登入採 Email 驗證或 Email／密碼模式；姓名、Email 與手機電話用於辨識學員與課程聯絡。若使用 Email／密碼，應要求學員首次登入後自行變更密碼。
+展示資料只存在使用者目前瀏覽器的 localStorage。姓名、Email 與手機電話用於辨識學員與課程聯絡。
 
 ## 啟動與建置
 

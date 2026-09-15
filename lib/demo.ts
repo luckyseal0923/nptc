@@ -1,6 +1,7 @@
 import { computeThreshold, DEFAULT_STATIONS, type StationDefinition } from './grading';
 
-export const DEMO_MODE = true;
+// 正式模式：所有名冊、題目與成績都由 Supabase 儲存。
+export const DEMO_MODE = false;
 
 type DemoRole = 'teacher' | 'student';
 type DemoUser = { role: DemoRole; username: string; email: string };
