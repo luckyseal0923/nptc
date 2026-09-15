@@ -172,7 +172,7 @@ export default function StudentDashboard({
                   <span className="section-label">ABOUT BORDERLINE SCORE</span>
                   <h2>什麼是邊緣及格分數？</h2>
                 </div>
-                <p>每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。本工作坊以 Rating＝3 代表邊緣表現；系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。</p>
+                <p>每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。<strong className="borderline-standard">Rating＝3 代表考官依你的整體表現判斷，認為你已達國家考試的及格標準。</strong> 系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。</p>
                 <p><strong>它用來幫助你理解自己的表現與考官判斷的基準。</strong> 本系統以每題的邊緣及格分數判斷及格；得分等於或高於該分數即為及格。</p>
               </section>
               <section className="day-section">
