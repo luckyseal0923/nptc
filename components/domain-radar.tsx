@@ -12,7 +12,7 @@ export function DomainRadar({ scores, maximum, title = '五大面向表現' }: {
     <svg viewBox="0 0 420 300" role="img" aria-labelledby={`${id}-title ${id}-description`}>
       <title id={`${id}-title`}>{title}，各軸最高 5 分</title><desc id={`${id}-description`}>{DOMAINS.map((d,i)=>`${d.label} ${values[i].toFixed(2)} / 5`).join('；')}</desc>
       {[1,2,3,4,5].map(level=><g key={level}><polygon points={points(level*20)} fill={level===5?'#f5f8f2':'none'} stroke="#ccd9d0"/><text x="215" y={150-level*20+4} fontSize="10" fill="#5f7469">{level}</text></g>).reverse()}
-      {DOMAINS.map((d,i)=>{const [x,y]=point(i,100),[tx,ty]=point(i,132);return <g key={d.key}><line x1="210" y1="150" x2={x} y2={y} stroke="#ccd9d0"/><text x={tx} y={ty} textAnchor={i===0?'middle':i<3?'start':'end'} dominantBaseline="middle" fontSize="13" fill="#133b38">{d.label}</text></g>;})}
+      {DOMAINS.map((d,i)=>{const [x,y]=point(i,100),[tx,ty]=point(i,138);return <g key={d.key}><line x1="210" y1="150" x2={x} y2={y} stroke="#ccd9d0"/><text x={tx} y={ty} textAnchor={i===0?'middle':i<3?'start':'end'} dominantBaseline="middle" fontSize="18" fontWeight="600" fill="#133b38">{d.label}</text></g>;})}
       <polygon points={values.map((v,i)=>point(i,v*20).join(',')).join(' ')} fill="#398274" fillOpacity="0.22" stroke="#176b57" strokeWidth="2"/>
       {values.map((v,i)=>{const [cx,cy]=point(i,v*20);return <circle key={i} cx={cx} cy={cy} r="3" fill="#176b57"/>;})}
     </svg>
