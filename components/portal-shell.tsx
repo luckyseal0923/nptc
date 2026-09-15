@@ -26,6 +26,7 @@ export function PortalShell({
             </span>
             <span>
               <strong className="block text-lg tracking-wide">為國考而訓</strong>
+              {teacher && <span className="mt-1 block text-sm font-semibold text-[#174943]">後臺管理系統</span>}
               <small className="tracking-[0.22em] text-[#2c6660]">NP ・ OSCE WORKSHOP</small>
             </span>
           </Link>
