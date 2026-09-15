@@ -183,17 +183,20 @@ export default function StudentDashboard({
                         t = record.thresholds.find((t) => t.key === station.key);
                       return (
                         <article className="student-score-card" key={station.key}>
-                          <div className="panel-heading">
-                            <h3>{station.title}</h3>
-                            {station.testDate && <span className="section-label">測驗日期：{station.testDate}</span>}
-                            {(station.complaint || station.diagnosis) && <p className="form-help mt-1">{station.complaint && `主訴：${station.complaint}`} {station.diagnosis && `｜最終診斷：${station.diagnosis}`}</p>}
-                            {station.prompt && <p className="form-help mt-1">{station.prompt}</p>}
+                          <div className="score-card-heading">
+                            <div><h3>{station.title}</h3>
+                            {station.testDate && <p className="score-test-date">測驗日期 <time dateTime={station.testDate}>{station.testDate}</time></p>}</div>
                             <span
                               className={`result-badge ${score === null ? 'pending' : score >= 60 ? 'pass' : 'below'}`}
                             >
                               {gradeStatus(score)}
                             </span>
                           </div>
+                          <dl className="score-case-details">
+                            {station.complaint && <div><dt>個案主訴</dt><dd>{station.complaint}</dd></div>}
+                            {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
+                            {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
+                          </dl>
                           <div className="personal-score">
                             {formatScore(score)}
                             <span> / 100</span>
