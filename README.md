@@ -79,3 +79,19 @@ node scripts/check-supabase.mjs
 Supabase 需啟用 Email 註冊與可用 SMTP，Redirect URLs 需包含 `https://luckyseal0923.github.io/nptc/teacher/` 及 `https://luckyseal0923.github.io/nptc/student/`。既有帳號與申請資料保存在私有 schema，僅透過檢查權限的 RPC 存取。資料庫升級尚未執行時介面會提示設定未完成，不會改用展示資料。
 
 帳號權限回歸測試：先執行 npm install --prefix .verify-accounts --no-package-lock --no-save @electric-sql/pglite，再執行 node tests/backend-accounts.mjs。測試使用隔離 PostgreSQL 引擎，不會連接正式資料庫。
+
+## 學員首次啟用與密碼登入
+
+在既有升級完成後，於 SQL Editor 執行完整 `supabase/upgrade-student-activation.sql`，此檔須最後執行。若重跑舊的個人資料或動態題目升級檔，必須再跑此檔恢復啟用檢查。
+
+1. 管理員先建立梯次及姓名、Email、手機名冊。
+2. 學員選「首次啟用帳號」，填三項資料並收取 Email 驗證信。驗證信箱後才由資料庫核對名冊，不向匿名使用者透露名冊內容。
+3. 核對後顯示名冊基本資料，學員補齊護理年資、服務醫院、單位、報考科別、首次 OSCE 與生日，設定至少 8 字元密碼。Email 沿用名冊，如需修改由管理員處理。
+4. 完成啟用後，使用 Email 與密碼登入，僅看本人已公布成績。未完成者登入後繼續啟用流程，不會取得成績。既有學員也須首次完成此步驟。
+5. 忘記密碼透過已驗證 Email 收取重設連結；手機僅用於核對名冊，不再作為登入密碼。
+
+Supabase Auth 必須啟用 Email、確認信箱與可用 SMTP。Redirect URLs 除原本兩個頁面外，加入 `https://luckyseal0923.github.io/nptc/student/?reset=1`；本機測試亦加入對應的本機 student URL。密碼由 Supabase Auth 管理，前端及學員資料表不保存明文密碼。郵件連結失效可重新申請。
+
+驗證指令：`node tests/student-activation.mjs`（使用上述 PGlite 測試依賴）。測試實際執行完整 SQL 升級鏈，涵蓋名冊不符、跨帳號、未啟用拒絕、資料完整性、逐題公布與重複升級。這不等於正式環境的寄信與登入驗證，部署後仍須用測試名冊實際完成一次啟用、登出、密碼登入及重設密碼。
+
+Auth API 依據：[重設密碼](https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail)、[更新密碼](https://supabase.com/docs/reference/javascript/auth-updateuser)。

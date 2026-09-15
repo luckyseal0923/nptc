@@ -29,8 +29,8 @@ type RecordItem = {
   stations?: StationDefinition[];
   profile?: { nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
 };
-type Hospital = { name: string; city: string; level: string };
-function HospitalPicker({ defaultValue, hospitals, loading }: { defaultValue: string; hospitals: Hospital[]; loading: boolean }) {
+export type Hospital = { name: string; city: string; level: string };
+export function HospitalPicker({ defaultValue, hospitals, loading }: { defaultValue: string; hospitals: Hospital[]; loading: boolean }) {
   const [query, setQuery] = useState(defaultValue);
   const [selected, setSelected] = useState(defaultValue);
   const options = hospitals.filter((item) => `${item.name}${item.city}${item.level}`.includes(query)).slice(0, 8);

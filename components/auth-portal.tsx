@@ -1,58 +1,52 @@
 import { useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import TeacherDashboard from '@/app/teacher/teacher-dashboard';
 import StudentDashboard from '@/app/student/student-dashboard';
 import { BackendApplication, BackendAccounts } from '@/components/backend-accounts';
+import { StudentLogin, StudentActivation, ResetStudentPassword, type Onboarding } from '@/components/student-access';
 import { DEMO_MODE, demoUser } from '@/lib/demo';
 import { rpc, supabase } from '@/lib/supabase';
 import { LoginPanel, PortalShell } from '@/components/portal-shell';
 
 export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [user, setUser] = useState<{ role: 'teacher' | 'student'; username: string; email: string } | null | undefined>(undefined);
-  const [verificationError, setVerificationError] = useState('');
-
+  const [status, setStatus] = useState<Onboarding | null>(null);
+  const [error, setError] = useState(''), [version, setVersion] = useState(0);
+  const [recovery, setRecovery] = useState(new URLSearchParams(location.search).get('reset') === '1');
   useEffect(() => {
-    if (DEMO_MODE) {
-      setUser(demoUser());
-      return;
-    }
+    if (DEMO_MODE) { setUser(demoUser()); return; }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, current) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+      setSession(current);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+  const email = session?.user.email, uid = session?.user.id;
+  const sessionReady = session !== undefined;
+  useEffect(() => {
+    if (DEMO_MODE || !sessionReady) return;
+    if (!email) { setUser(null); setStatus(null); setError(''); return; }
     let active = true;
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active) return;
-      const email = data.session?.user.email;
-      if (!email) { setUser(null); return; }
+    setUser(undefined); setError('');
+    (async () => {
       try {
         const isTeacher = await rpc<boolean>('nptc_is_teacher');
-        if (!teacher && !isTeacher) {
-          const requestedPhone = sessionStorage.getItem('nptc-pending-student-phone') ?? '';
-          const records = await rpc<{ records: Array<{ phone?: string | null }> }>('nptc_student_data');
-          const matches = records.records.some((record) => record.phone === requestedPhone);
-          if (!matches) {
-            await supabase.auth.signOut();
-            if (active) { setVerificationError('Email 已驗證，但手機電話與學員名冊不符。'); setUser(null); }
-            return;
-          }
-        }
-        if (active) setUser({ role: isTeacher ? 'teacher' : 'student', username: email, email });
-      } catch {
-        if (active) setUser(null);
-      }
-    });
+        const onboarding = !teacher && !isTeacher && !recovery ? await rpc<Onboarding>('nptc_student_onboarding_status') : null;
+        if (active) { setStatus(onboarding); setUser({ role: isTeacher ? 'teacher' : 'student', username: email, email }); }
+      } catch (cause) { if (active) setError((cause as Error).message); }
+    })();
     return () => { active = false; };
-  }, []);
-
-  if (user === undefined) return null;
-
-  return (
-    <PortalShell email={user?.username} teacher={teacher}>
-      {!user ? (
-        <><LoginPanel teacher={teacher} />{verificationError && <p className="mx-auto -mt-12 max-w-md rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{verificationError}</p>}</>
-      ) : teacher && user.role !== 'teacher' ? (
-        <BackendApplication email={user.email} />
-      ) : teacher ? (
-        <div className="workspace"><BackendAccounts /><TeacherDashboard /></div>
-      ) : (
-        <div className="workspace"><StudentDashboard isTeacher={user.role === 'teacher'} /></div>
-      )}
-    </PortalShell>
-  );
+  }, [email, uid, sessionReady, teacher, version, recovery]);
+  const reload = () => setVersion(v => v + 1);
+  return <PortalShell email={user?.username ?? email} teacher={teacher}>
+    {error ? <div className="mx-auto max-w-xl space-y-4 px-6 py-12" role="alert"><p>{error}</p><button className="underline" onClick={reload}>重新檢查</button></div>
+    : user === undefined ? <p className="px-6 py-12 text-center">正在確認登入狀態…</p>
+    : !user ? <>{!teacher && recovery && <p className="p-4 text-center" role="alert">請開啟最新的重設密碼信件；連結失效時可重新申請。</p>}{!teacher && !DEMO_MODE ? <StudentLogin /> : <LoginPanel teacher={teacher} />}</>
+    : !teacher && recovery ? <ResetStudentPassword onComplete={() => { setRecovery(false); reload(); }} />
+    : teacher && user.role !== 'teacher' ? <BackendApplication email={user.email} />
+    : teacher ? <div className="workspace"><BackendAccounts /><TeacherDashboard /></div>
+    : !DEMO_MODE && user.role !== 'teacher' && status?.stage !== 'active' ? <StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} />
+    : <div className="workspace"><StudentDashboard isTeacher={user.role === 'teacher'} /></div>}
+  </PortalShell>;
 }
