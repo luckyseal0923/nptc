@@ -51,7 +51,7 @@ export function StudentLogin() {
       {mode === 'activate' && <label className="block">手機電話<Input name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /></label>}
       {mode === 'login' && <label className="block">密碼<Input name="password" type="password" autoComplete="current-password" required /></label>}
       {error && <p role="alert" className="text-red-700">{error}</p>}{sent && <p role="status" className="rounded bg-green-50 p-3">{sent}</p>}
-      <div className="flex flex-wrap items-center gap-5"><Button disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '寄送啟用驗證信' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}>{mode === 'reset' ? '返回登入' : '忘記密碼？'}</button></div>
+      <div className="flex flex-wrap items-center gap-5"><Button type="submit" disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '寄送啟用驗證信' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}>{mode === 'reset' ? '返回登入' : '忘記密碼？'}</button></div>
     </form>
   </section>;
 }
@@ -94,7 +94,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
         <label className="block">出生年月日<Input name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /></label>
         <PasswordFields />
       </>}
-      {error && <p role="alert" className="text-red-700">{error}</p>}<Button disabled={busy || (state.stage === 'profile' && loading)}>{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}</Button>
+      {error && <p role="alert" className="text-red-700">{error}</p>}<Button type="submit" disabled={busy || (state.stage === 'profile' && loading)}>{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}</Button>
     </form></section>;
 }
 
@@ -104,5 +104,5 @@ export function ResetStudentPassword({ onComplete, teacher = false }: { onComple
     event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
     try { const { error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
     catch (cause) { setError(message(cause)); } finally { setBusy(false); }
-  }}><h1 className="text-2xl font-bold">重設登入密碼</h1><PasswordFields />{error && <p role="alert" className="text-red-700">{error}</p>}<Button disabled={busy}>{busy ? '儲存中…' : '儲存新密碼'}</Button></form>;
+  }}><h1 className="text-2xl font-bold">重設登入密碼</h1><PasswordFields />{error && <p role="alert" className="text-red-700">{error}</p>}<Button type="submit" disabled={busy}>{busy ? '儲存中…' : '儲存新密碼'}</Button></form>;
 }
