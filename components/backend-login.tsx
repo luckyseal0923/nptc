@@ -38,20 +38,20 @@ export function BackendLogin() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '操作失敗，請稍後重試。'); }
     finally { setBusy(false); }
   }
-  return <div className="mx-auto grid max-w-6xl gap-12 px-6 py-16 lg:grid-cols-2 lg:items-center">
-    <section><p className="mb-4 text-xs font-bold tracking-widest">TEACHING & ASSESSMENT</p><h1 className="text-4xl font-black leading-tight">讓每一份回饋，成為學員的下一步。</h1><p className="mt-7 leading-8">建立學員名冊、登錄 OSCE 分數與回饋，並逐題管理成績公布。</p></section>
+  return <div className="mx-auto grid max-w-6xl gap-12 px-6 py-16 lg:grid-cols-2 lg:items-start">
+    <section className="lg:pt-32"><p className="mb-4 text-xs font-bold tracking-widest">TEACHING & ASSESSMENT</p><h1 className="text-4xl font-black leading-tight">讓每一份回饋，成為學員的下一步。</h1><p className="mt-7 leading-8">建立學員名冊、登錄 OSCE 分數與回饋，並逐題管理成績公布。</p></section>
     <section className="rounded-2xl border border-[#d5e0d8] bg-white p-8 shadow-sm">
       <h2 className="text-2xl font-black">{mode === 'login' ? '後臺管理系統登入' : mode === 'signup' ? '申請後臺帳號' : '忘記密碼'}</h2>
       <p className="mt-3 text-sm leading-6">{mode === 'login' ? '使用 Email 與密碼登入；帳號須經管理員啟用。' : mode === 'signup' ? '填寫申請資料與密碼，完成首次信箱驗證後，等待管理員啟用。' : '原先使用信件登入的帳號，也可以在這裡設定密碼。'}</p>
       <div className="mt-5 flex flex-wrap gap-4 text-sm">{(['signup', 'reset'] as const).map(m => <button key={m} type="button" disabled={busy} aria-pressed={mode === m} className="underline" onClick={() => { setMode(m); setError(''); setNotice(''); }}>{m === 'signup' ? '申請帳號' : '忘記密碼'}</button>)}</div>
       <form key={mode} onSubmit={submit} className="mt-7"><fieldset disabled={busy} className="space-y-5">
-        {mode === 'signup' && <label className="block">姓名<Input name="name" required maxLength={100} autoComplete="name" /></label>}
-        <label className="block">Email<Input name="email" type="email" required autoComplete="username" /></label>
-        {mode !== 'reset' && <label className="block">{mode === 'signup' ? '設定密碼（至少 8 個字元）' : '密碼'}<Input name="password" type="password" required minLength={mode === 'signup' ? 8 : undefined} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>}
-        {mode === 'signup' && <><label className="block">再次輸入密碼<Input name="confirm" type="password" required minLength={8} autoComplete="new-password" /></label><label className="block">申請用途<Input name="reason" required maxLength={500} placeholder="例如：工作坊評分與名冊管理" /></label></>}
+        {mode === 'signup' && <label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" required maxLength={100} autoComplete="name" /></label>}
+        <label className="block">Email<Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" required autoComplete="username" /></label>
+        {mode !== 'reset' && <label className="block">{mode === 'signup' ? '設定密碼（至少 8 個字元）' : '密碼'}<Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" required minLength={mode === 'signup' ? 8 : undefined} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>}
+        {mode === 'signup' && <><label className="block">再次輸入密碼<Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" required minLength={8} autoComplete="new-password" /></label><label className="block">申請用途<Input className="mt-2 h-12 px-3 md:text-base" name="reason" required maxLength={500} placeholder="例如：工作坊評分與名冊管理" /></label></>}
         {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">{error}</p>}
         {notice && <p role="status" className="rounded bg-green-50 p-3 text-sm">{notice}</p>}
-        <Button type="submit" className="w-full">{busy ? '處理中…' : mode === 'login' ? '登入後臺' : mode === 'signup' ? '申請帳號' : '寄送設定密碼連結'}</Button>
+        <Button type="submit" className="h-12 w-full text-base font-bold">{busy ? '處理中…' : mode === 'login' ? '登入後臺' : mode === 'signup' ? '申請帳號' : '寄送設定密碼連結'}</Button>
       </fieldset></form>
       {mode !== 'login' && <button type="button" disabled={busy} className="mt-5 text-sm underline" onClick={() => { setMode('login'); setError(''); setNotice(''); }}>返回登入</button>}
     </section>
