@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import TeacherDashboard from '@/app/teacher/teacher-dashboard';
 import StudentDashboard from '@/app/student/student-dashboard';
 import { BackendApplication, BackendAccounts } from '@/components/backend-accounts';
+import { BackendLogin } from '@/components/backend-login';
 import { StudentLogin, StudentActivation, ResetStudentPassword, type Onboarding } from '@/components/student-access';
 import { DEMO_MODE, demoUser } from '@/lib/demo';
 import { rpc, supabase } from '@/lib/supabase';
@@ -42,8 +43,8 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
   return <PortalShell email={user?.username ?? email} teacher={teacher}>
     {error ? <div className="mx-auto max-w-xl space-y-4 px-6 py-12" role="alert"><p>{error}</p><button className="underline" onClick={reload}>重新檢查</button></div>
     : user === undefined ? <p className="px-6 py-12 text-center">正在確認登入狀態…</p>
-    : !user ? <>{!teacher && recovery && <p className="p-4 text-center" role="alert">請開啟最新的重設密碼信件；連結失效時可重新申請。</p>}{!teacher && !DEMO_MODE ? <StudentLogin /> : <LoginPanel teacher={teacher} />}</>
-    : !teacher && recovery ? <ResetStudentPassword onComplete={() => { setRecovery(false); reload(); }} />
+    : !user ? <>{recovery && <p className="p-4 text-center" role="alert">請開啟最新的重設密碼信件；連結失效時可重新申請。</p>}{!DEMO_MODE ? (teacher ? <BackendLogin /> : <StudentLogin />) : <LoginPanel teacher={teacher} />}</>
+    : recovery ? <ResetStudentPassword teacher={teacher} onComplete={() => { setRecovery(false); reload(); }} />
     : teacher && user.role !== 'teacher' ? <BackendApplication email={user.email} />
     : teacher ? <div className="workspace"><BackendAccounts /><TeacherDashboard /></div>
     : !DEMO_MODE && user.role !== 'teacher' && status?.stage !== 'active' ? <StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} />

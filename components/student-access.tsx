@@ -98,11 +98,11 @@ export function StudentActivation({ email, status, onComplete }: { email: string
     </form></section>;
 }
 
-export function ResetStudentPassword({ onComplete }: { onComplete: () => void }) {
+export function ResetStudentPassword({ onComplete, teacher = false }: { onComplete: () => void; teacher?: boolean }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   return <form className="mx-auto my-12 max-w-lg space-y-5 rounded-xl border bg-white p-6" onSubmit={async event => {
     event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
-    try { const { error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; history.replaceState(null, '', redirect()); onComplete(); }
+    try { const { error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
     catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }}><h1 className="text-2xl font-bold">重設登入密碼</h1><PasswordFields />{error && <p role="alert" className="text-red-700">{error}</p>}<Button disabled={busy}>{busy ? '儲存中…' : '儲存新密碼'}</Button></form>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { rpc } from '@/lib/supabase';
+import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -13,7 +13,19 @@ export function BackendApplication({ email }: { email: string }) {
   const [busy, setBusy] = useState(false);
   async function refresh() {
     setError('');
-    try { setStatus(await rpc<Status>('nptc_backend_account_status')); }
+    try {
+      let current = await rpc<Status>('nptc_backend_account_status');
+      if (!current.application) {
+        const { data, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        // Metadata is application text only. Approval remains in the guarded RPC.
+        const draft = data.user?.user_metadata?.backend_application;
+        if (typeof draft?.name === 'string' && typeof draft?.reason === 'string' && draft.name.trim() && draft.reason.trim()) {
+          current = await rpc<Status>('nptc_apply_backend_account', { body: { name: draft.name, reason: draft.reason } });
+        }
+      }
+      setStatus(current);
+    }
     catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { void refresh(); }, []);
