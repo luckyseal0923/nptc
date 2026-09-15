@@ -26,7 +26,6 @@ export function PortalShell({
             </span>
             <span>
               <strong className="block text-lg tracking-wide">為國考而訓</strong>
-              {teacher && <span className="mt-1 block text-sm font-semibold text-[#174943]">後臺管理系統</span>}
               <small className="tracking-[0.22em] text-[#2c6660]">NP ・ OSCE WORKSHOP</small>
             </span>
           </Link>
@@ -54,6 +53,11 @@ export function PortalShell({
           </nav>
         </div>
       </header>
+      {teacher && <div className="border-b border-[#cbdacf] bg-[#eaf1e5]">
+        <div className="mx-auto max-w-7xl px-6 py-5">
+          <p className="border-l-4 border-[#174943] pl-4 text-2xl font-black tracking-wide text-[#123f3a]">後臺管理系統</p>
+        </div>
+      </div>}
       {children}
     </main>
   );
