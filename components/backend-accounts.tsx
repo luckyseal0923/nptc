@@ -60,9 +60,9 @@ export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
   return <section className="data-panel" style={{ marginTop: 24 }}>
     <div className="panel-heading"><h2>帳號管理</h2>{canReview && <Button className="action secondary" onClick={() => setOpen(!open)}>{open ? '收合帳號管理' : `查看帳號（${accounts.filter(a => a.status === 'pending').length} 筆待審核）`}</Button>}</div>
     {error && <p role="alert" className="notice error">{error}<Button className="action secondary" onClick={load}>重試</Button></p>}
-    {open && <><p className="form-help">啟用後可管理所有工作坊；停用後，後續資料操作會被拒絕。</p><div className="station-settings-grid">{accounts.map(account => <article className="station-setting" key={account.email}>
-      <h3>{account.name}</h3><p style={{ overflowWrap: 'anywhere' }}>{account.email}</p><p>{account.reason}</p><p className="form-help">{labels[account.status]}{account.protected ? ' · 審核管理員' : ''}</p>
-      {!account.protected && <Button className="action" disabled={busy} onClick={async () => {
+    {open && <><p className="form-help">啟用後可管理所有工作坊；停用後，後續資料操作會被拒絕。</p><div className="station-settings-grid">{accounts.map(account => <article className="station-setting account-card" key={account.email}>
+      <h3>{account.name}</h3><p style={{ overflowWrap: 'anywhere' }}>{account.email}</p><p>{account.reason}</p><p className={`form-help account-status ${account.status}`}>{labels[account.status]}{account.protected ? ' · 審核管理員' : ''}</p>
+      {!account.protected && <Button className={account.status === 'active' ? 'action destructive' : 'action'} disabled={busy} onClick={async () => {
         setBusy(true); setError('');
         try { await rpc('nptc_set_backend_account', { body: { email: account.email, enabled: account.status !== 'active' } }); await load(); }
         catch(e) { setError((e as Error).message); } finally { setBusy(false); }

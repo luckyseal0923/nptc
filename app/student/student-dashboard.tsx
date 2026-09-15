@@ -193,11 +193,6 @@ export default function StudentDashboard({
                               {status}
                             </span>
                           </div>
-                          <dl className="score-case-details">
-                            {station.complaint && <div><dt>個案主訴</dt><dd>{station.complaint}</dd></div>}
-                            {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
-                            {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
-                          </dl>
                           <div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}>
                             {formatScore(score)}
                             <span> / 100</span>
@@ -234,6 +229,11 @@ export default function StudentDashboard({
                               <dt>Global Rating</dt>
                               <dd>{g?.rating ?? '—'} / 5</dd>
                             </div>
+                          </dl>
+                          <dl className="score-case-details">
+                            {station.complaint && <div><dt>個案主訴</dt><dd>{station.complaint}</dd></div>}
+                            {station.diagnosis && <div><dt>最終診斷</dt><dd>{station.diagnosis}</dd></div>}
+                            {station.prompt && <div><dt>命題內容摘要</dt><dd>{station.prompt}</dd></div>}
                           </dl>
                           {g?.feedback && (
                             <div className="qualitative-feedback">

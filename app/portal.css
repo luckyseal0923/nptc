@@ -31,3 +31,44 @@
 @media(max-width:480px){.student-score-card{padding:20px}.student-score-card .score-card-heading h3{font-size:20px}.score-card-heading{gap:10px}.score-case-details{padding:16px}}
 .student-score-card .personal-score.score-failed{color:#b42318}
 .student-score-card .result-badge.below{background:#fff0ee;color:#b42318}
+
+/* Visual refinement: preserve controls and workflow, reduce decorative height. */
+.workspace{padding-top:28px}
+.teacher-heading{margin-bottom:20px}
+.workspace h1{font-size:30px;line-height:1.35}
+.workshop-control-card{padding:20px 24px;gap:18px}
+.workshop-control-copy h2{font-size:23px}
+.workflow-card-grid{margin:20px 0 18px;gap:12px}
+.workflow-card{min-height:110px;padding:16px;gap:7px}
+.workflow-card.active{padding:15px}
+.workflow-card strong{font-size:17px}
+.workflow-card small{line-height:1.5}
+.data-panel th,.data-panel td,.data-panel tr{border-color:#dce5df}
+.data-panel td{padding:12px 10px;vertical-align:top}
+.data-panel th{font-weight:650;color:#34594e}
+.score-batch-form textarea{min-height:56px;line-height:1.6}
+.account-card h3{font-size:19px;font-weight:700;line-height:1.5;overflow-wrap:anywhere}
+.account-card p{line-height:1.7;margin-top:8px;color:#536b63}
+.account-card .account-status{display:inline-block;padding:4px 10px;border-radius:20px;font-size:13px;font-weight:650;margin:14px 0;background:#f2f4f1}
+.account-card .account-status.active{background:#e8f2e3;color:#315c35}
+.account-card .account-status.pending{background:#fff5df;color:#785615}
+.account-card .account-status.disabled{background:#fff0ee;color:#a13d2d}
+.account-card .action{display:flex;margin-top:8px}
+.student-score-card .personal-score{margin-top:12px}
+.student-score-card .score-case-details{margin-top:22px}
+.student-summary>div:nth-child(2) strong{font-size:24px;line-height:1.5}
+@media(max-width:680px){
+ .workspace{padding-top:24px}
+ .workspace h1{font-size:26px}
+ .workshop-control-card{padding:18px;gap:14px}
+ .workflow-card-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .workflow-card{min-height:112px;padding:12px}
+ .workflow-card.active{padding:11px}
+ .workflow-card strong{font-size:15px}
+ .workflow-card small{font-size:12px}
+ .data-panel{padding:18px}
+ .day-heading{align-items:flex-start;flex-direction:column;gap:10px}
+ .student-summary>div:nth-child(2) strong{font-size:21px}
+ .borderline-explainer{padding:20px;gap:14px;margin-bottom:24px}
+ .score-batch-form::before{content:"表格可左右滑動，查看分數、評等與回饋";display:block;font-size:13px;color:#536b63;margin-bottom:12px}
+}
