@@ -82,7 +82,12 @@ export default function TeacherDashboard() {
   }
 
   if (!data) return <section className="portal-panel"><p>{error ? '課程資料載入失敗' : '正在載入教學評量資料…'}</p>{error && <><p role="alert" className="notice error">{error}</p><Button type="button" disabled={busy} className="action" onClick={() => changeWorkshop('')}>{busy ? '載入中…' : '重新載入'}</Button></>}</section>;
-  if (!data.selected) return <section className="empty-panel"><h2>先建立第一個工作坊梯次</h2><p>每個梯次會各自管理名冊、題目、成績與邊緣及格分數。</p></section>;
+  if (!data.selected) return <section className="empty-panel"><h2>先建立第一個工作坊梯次</h2><p>每個梯次會各自管理名冊、題目、成績與邊緣及格分數。</p><form className="entry-form" onSubmit={async event => {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
+    if (!name) { setError('請填寫梯次名稱。'); return; }
+    await save({ action: 'createWorkshop', name }, '新梯次已建立。');
+  }}><label>梯次名稱<Input name="name" required maxLength={100} placeholder="例如：2026 國考班" /></label>{error && <p role="alert">{error}</p>}<Button type="submit" disabled={busy}>{busy ? '建立中…' : '建立第一個梯次'}</Button></form></section>;
 
   return <>
     <header className="teacher-heading">
