@@ -29,7 +29,7 @@ export function BackendWorkspace() {
       {(['courses', 'analysis', ...(canReview ? ['accounts'] : [])] as ('courses' | 'analysis' | 'accounts')[]).map(value => <button
         key={value} type="button" aria-current={page === value ? 'page' : undefined}
         aria-controls={`backend-${value}`}
-        className={`border-b-2 py-1 text-sm ${page === value ? 'border-[#174943] font-bold text-[#174943]' : 'border-transparent text-[#56716c] hover:text-[#174943]'}`}
+        className={`border-b-2 py-1 text-sm text-[#174943] ${page === value ? 'border-[#174943] font-bold' : 'border-transparent hover:border-[#9bb5aa]'}`}
         onClick={() => setPage(value)}>{value === 'courses' ? '課程與成績管理' : value === 'analysis' ? '學習分析儀表板' : '帳號管理'}</button>)}
     </>, navigation)}
     {error && <p role="alert" className="mb-4 text-sm">{error} <button type="button" className="underline" onClick={() => setRetry(v => v + 1)}>重新確認</button></p>}

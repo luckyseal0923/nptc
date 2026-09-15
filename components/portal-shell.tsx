@@ -30,14 +30,14 @@ export function PortalShell({
             </span>
           </Link>
           <button type="button" className="rounded border px-3 py-2 lg:hidden" aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>選單</button>
-          <nav id="portal-navigation" aria-label="網站導覽" className={`${menuOpen ? 'flex' : 'hidden'} w-full flex-col items-start gap-5 text-sm font-medium lg:flex lg:w-auto lg:flex-row lg:items-center`}>
+          <nav id="portal-navigation" aria-label="網站導覽" className={`${menuOpen ? 'flex' : 'hidden'} w-full flex-col items-start gap-5 text-sm font-medium text-[#174943] lg:flex lg:w-auto lg:flex-row lg:items-center`}>
             <div id="backend-navigation" className="flex flex-col gap-5 lg:flex-row lg:items-center" />
-            {teacher && <Link href="/student/">學員專區</Link>}
-            <Link href="/">課程首頁</Link>
+            {teacher && <Link className="border-b-2 border-transparent py-1 hover:border-[#9bb5aa]" href="/student/">學員專區</Link>}
+            <Link className="border-b-2 border-transparent py-1 hover:border-[#9bb5aa]" href="/">課程首頁</Link>
             {email && (
               <button
                 type="button"
-                className="rounded-md border border-[#b9cdc5] px-3 py-1.5 text-xs"
+                className="rounded-md border border-[#b9cdc5] px-3 py-1.5 text-xs text-[#174943]"
                 onClick={() => {
                   if (DEMO_MODE) {
                     signOutDemo();
