@@ -1,0 +1,37 @@
+import { PGlite } from '../.verify-accounts/node_modules/@electric-sql/pglite/dist/index.js';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth; create schema nptc_private;
+create table auth.users(id uuid primary key,email text);
+create table nptc_private.students(id uuid primary key,name text,email text,phone text);
+create function auth.uid() returns uuid language sql as $$select '00000000-0000-0000-0000-000000000001'::uuid$$;
+create function public.nptc_is_teacher() returns boolean language sql as $$select coalesce(current_setting('test.teacher',true),'false')='true'$$;
+grant usage on schema auth to authenticated;`);
+const migration=readFileSync('supabase/upgrade-student-invitation.sql','utf8');
+await db.exec(migration);
+await db.exec(`insert into nptc_private.students values ('10000000-0000-0000-0000-000000000001','Test','test@example.invalid','0912345678');`);
+async function issue(){return (await db.query(`select public.nptc_issue_student_invitation('10000000-0000-0000-0000-000000000001') as r`)).rows[0].r;}
+async function consume(body){return (await db.query('select public.nptc_consume_student_invitation($1::jsonb) as r',[JSON.stringify(body)])).rows[0].r;}
+await db.exec('set role anon'); await assert.rejects(issue);
+await db.exec('reset role; set role authenticated'); await assert.rejects(issue);
+await db.exec(`select set_config('test.teacher','true',false)`);
+const first=await issue(); assert.match(first.code,/^[a-f0-9]{64}$/);
+await assert.rejects(()=>consume({}));
+await db.exec('reset role; set role service_role');
+const body={name:'Test',email:'test@example.invalid',phone:'0912345678',code:first.code};
+assert.equal((await consume({...body,phone:'0900000000'})).ok,false);
+assert.equal((await consume({...body,code:'0'.repeat(64)})).ok,false);
+assert.equal((await consume(body)).ok,true); assert.equal((await consume(body)).ok,false);
+await db.exec('reset role; set role authenticated');
+const second=await issue(),third=await issue();
+await db.exec('reset role; set role service_role');
+assert.equal((await consume({...body,code:second.code})).ok,false);
+await db.exec(`reset role; update nptc_private.student_invitations set expires_at=now()-interval '1 second'; set role service_role`);
+assert.equal((await consume({...body,code:third.code})).ok,false);
+await db.exec(`reset role; insert into auth.users values ('00000000-0000-0000-0000-000000000002','test@example.invalid'); set role authenticated`);
+await assert.rejects(issue);
+await db.exec('reset role'); await db.exec(migration);
+const stored=(await db.query('select code_hash from nptc_private.student_invitations')).rows[0].code_hash;
+assert.notEqual(stored,third.code);
+await db.close(); console.log('PASS: role checks, identity mismatch, wrong code, one-time consumption, reissue, expiry, existing account protection and rerun');

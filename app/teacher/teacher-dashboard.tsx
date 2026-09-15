@@ -15,6 +15,15 @@ export default function TeacherDashboard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [invitation, setInvitation] = useState<{ name: string; code: string } | null>(null);
+  async function issueInvitation(student: Student) {
+    setBusy(true); setError(''); setInvitation(null);
+    try {
+      const result = await rpc<{ code: string }>('nptc_issue_student_invitation', { student_id: student.id });
+      setInvitation({ name: student.name, code: result.code });
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(false); }
+  }
   const [editing, setEditing] = useState<Student | null>(null);
   const [tab, setTab] = useState('roster');
   const [showCreate, setShowCreate] = useState(false);
@@ -96,6 +105,7 @@ export default function TeacherDashboard() {
     </header>
     {error && <div role="alert" className="notice error">{error}</div>}
     {message && <div role="status" className="notice success">{message}</div>}
+    {invitation && <section className="notice success" role="status"><strong>{invitation.name}的一次性啟用碼</strong><p>七天內有效，僅能使用一次。請私下交給這位學員；重新產生會讓舊碼失效。</p><Input aria-label="一次性啟用碼" value={invitation.code} readOnly onFocus={event => event.target.select()} /><Button type="button" className="secondary" onClick={() => setInvitation(null)}>關閉</Button></section>}
 
     <section className="workshop-control-card">
       <div className="workshop-control-copy"><span className="section-label">CURRENT WORKSHOP</span><h2>{data.selected.name}</h2><p>此梯次的名冊、OSCE 題目、成績與公告皆獨立管理。</p></div>
@@ -141,7 +151,7 @@ export default function TeacherDashboard() {
           </section>
         </div>
         <section className="data-panel roster-current"><div className="panel-heading"><div><span className="section-label">CURRENT ROSTER</span><h2>目前學員名冊</h2></div><span>{data.students.length} 位學員</span></div>
-          {data.students.length ? <Table><TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}</TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
+          {data.students.length ? <Table><TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{data.students.map((student) => <TableRow key={student.id}><TableCell>{student.name}</TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button type="button" className="action small secondary" disabled={busy} onClick={() => issueInvitation(student)}>產生啟用碼</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
         </section>
       </TabsContent>
 

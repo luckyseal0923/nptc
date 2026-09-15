@@ -1,0 +1,16 @@
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+import assert from 'node:assert/strict';
+let handler, consumed=0, created=0, allow=true, createFail=false;
+const client={rpc:async()=>{consumed++;return {data:{ok:allow,email:'test@example.invalid'},error:null}},auth:{admin:{createUser:async()=>{created++;return {error:createFail?new Error('fail'):null}}}}};
+const source=readFileSync('supabase/functions/student-activate/index.ts','utf8').replace(/^import .*\n/,'');
+vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,{Response,Request,createClient:()=>client,Deno:{env:{get:()=>''},serve:fn=>handler=fn}});
+const body={name:'Test',email:'test@example.invalid',phone:'0912345678',code:'a'.repeat(64),password:'Test-password-123'};
+const post=data=>handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify(data)}));
+assert.equal((await post({...body,password:'short'})).status,400);assert.equal(consumed,0);
+allow=false;assert.equal((await post(body)).status,400);assert.equal(created,0);
+allow=true;assert.equal((await post(body)).status,200);assert.equal(created,1);
+createFail=true;assert.equal((await post(body)).status,409);
+assert.equal((await handler(new Request('https://example.invalid',{method:'GET'}))).status,405);
+console.log('PASS: invalid input rejected before RPC, rejected invitation cannot create account, success and creation failure responses');

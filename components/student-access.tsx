@@ -31,9 +31,15 @@ export function StudentLogin() {
       } else if (mode === 'activate') {
         sessionStorage.setItem('nptc-activation-name', String(fields.get('name')).trim());
         sessionStorage.setItem('nptc-activation-phone', String(fields.get('phone')).trim());
-        const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect() } });
-        if (error) throw error;
-        setSent('驗證信已寄出。請開啟信中的連結，核對名冊後補齊資料並設定密碼。');
+        const password = passwordFrom(fields);
+        const { error } = await supabase.functions.invoke('student-activate', { body: {
+          email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
+          code: String(fields.get('code')).trim(), password,
+        } });
+        if (error) throw new Error('啟用未完成，請確認名冊資料及啟用碼；若已建立帳號，請改用學員登入。');
+        sessionStorage.setItem('nptc-password-created', email.toLowerCase());
+        const login = await supabase.auth.signInWithPassword({ email, password });
+        if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
         if (error) throw error;
@@ -46,17 +52,19 @@ export function StudentLogin() {
     <div className="grid gap-4 sm:grid-cols-2">{(['activate', 'login'] as const).map(value => <button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() => { setMode(value); setError(''); setSent(''); }} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}><strong className="block text-xl">{value === 'activate' ? '首次啟用帳號' : '學員登入'}</strong><span className="mt-2 block text-sm">{value === 'activate' ? '核對姓名、Email、手機，建立登入密碼' : '使用已設定的 Email 與密碼登入'}</span></button>)}</div>
     <form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8">
       <h2 className="text-xl font-bold">{mode === 'activate' ? '首次啟用帳號' : mode === 'reset' ? '忘記密碼' : '學員登入'}</h2>
-      {mode === 'activate' && <><p className="text-sm">請填寫報名時的資料。系統會先驗證信箱，再核對管理員建立的名冊。</p><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /></label></>}
+      {mode === 'activate' && <><p className="text-sm">填寫報名資料與管理員提供的一次性啟用碼，再設定登入密碼，不需要收驗證信。</p><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /></label></>}
       <label className="block">Email<Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /></label>
       {mode === 'activate' && <label className="block">手機電話<Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /></label>}
+      {mode === 'activate' && <><label className="block">一次性啟用碼<Input className="mt-2 h-12 px-3 md:text-base" name="code" autoComplete="off" minLength={64} maxLength={64} required /></label><PasswordFields /></>}
       {mode === 'login' && <label className="block">密碼<Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /></label>}
       {error && <p role="alert" className="text-red-700">{error}</p>}{sent && <p role="status" className="rounded bg-green-50 p-3">{sent}</p>}
-      <div className="flex flex-wrap items-center gap-5"><Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '寄送啟用驗證信' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}>{mode === 'reset' ? '返回登入' : '忘記密碼？'}</button></div>
+      <div className="flex flex-wrap items-center gap-5"><Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}>{mode === 'reset' ? '返回登入' : '忘記密碼？'}</button></div>
     </form>
   </section>;
 }
 
 export function StudentActivation({ email, status, onComplete }: { email: string; status: Onboarding; onComplete: () => void }) {
+  const passwordCreated = sessionStorage.getItem('nptc-password-created') === email.toLowerCase();
   const [state, setState] = useState(status), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [hospitals, setHospitals] = useState<Hospital[]>([]), [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -72,11 +80,11 @@ export function StudentActivation({ email, status, onComplete }: { email: string
         sessionStorage.removeItem('nptc-activation-name'); sessionStorage.removeItem('nptc-activation-phone');
         if (result.stage === 'active') onComplete(); else setState(result);
       } else {
-        const password = passwordFrom(fields), hospital = String(fields.get('hospital') ?? '');
+        const password = passwordCreated ? null : passwordFrom(fields), hospital = String(fields.get('hospital') ?? '');
         if (!hospitals.some(h => h.name === hospital)) throw new Error('請搜尋並點選服務醫院全名。');
         await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit')).trim(), examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
-        const { error } = await supabase.auth.updateUser({ password }); if (error) throw error;
-        await rpc('nptc_finish_student_activation'); onComplete();
+        if (password !== null) { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; }
+        await rpc('nptc_finish_student_activation'); sessionStorage.removeItem('nptc-password-created'); onComplete();
       }
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }
@@ -92,7 +100,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
         <label className="block">報考科別<select name="examSpecialty" defaultValue={student?.examSpecialty ?? ''} className="block w-full rounded border p-3" required><option value="">請選擇</option>{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(s => <option key={s}>{s}</option>)}</select></label>
         <label className="block">是否首次報考國家 OSCE<select name="firstOsce" defaultValue={student?.firstOsce == null ? '' : student.firstOsce ? 'yes' : 'no'} className="block w-full rounded border p-3" required><option value="">請選擇</option><option value="yes">是</option><option value="no">否</option></select></label>
         <label className="block">出生年月日<Input className="mt-2 h-12 px-3 md:text-base" name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /></label>
-        <PasswordFields />
+        {!passwordCreated && <PasswordFields />}
       </>}
       {error && <p role="alert" className="text-red-700">{error}</p>}<Button className="min-h-12 px-6 text-base" type="submit" disabled={busy || (state.stage === 'profile' && loading)}>{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}</Button>
     </form></section>;
