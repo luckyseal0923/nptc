@@ -16,7 +16,6 @@ import {
 } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import Link from '@/components/link';
 type RecordItem = {
   id: string;
   name: string;
@@ -37,11 +36,7 @@ export function HospitalPicker({ defaultValue, hospitals, loading }: { defaultVa
   const options = hospitals.filter((item) => `${item.name}${item.city}${item.level}`.includes(query)).slice(0, 8);
   return <label className="hospital-picker">服務醫院<Input value={query} onChange={(event) => { setQuery(event.target.value); setSelected(''); }} placeholder="輸入醫院或縣市關鍵字搜尋" autoComplete="off" /><input type="hidden" name="hospital" value={selected} />{loading && <small>正在載入政府醫院名冊…</small>}{query && !selected && !loading && <div className="hospital-options">{options.length ? options.map((item) => <button type="button" key={`${item.city}-${item.name}`} onClick={() => { setSelected(item.name); setQuery(item.name); }}>{item.name}<small>{item.city} · {item.level}</small></button>) : <p>找不到相符醫院，請調整關鍵字後再試。</p>}</div>}{selected && <small>已選擇：{selected}</small>}</label>;
 }
-export default function StudentDashboard({
-  isTeacher,
-}: {
-  isTeacher: boolean;
-}) {
+export default function StudentDashboard() {
   const [records, setRecords] = useState<RecordItem[] | null>(null),
     [selected, setSelected] = useState(''),
     [error, setError] = useState(''),
@@ -90,11 +85,6 @@ export default function StudentDashboard({
               : '回顧每一次練習，整理下一步的方向。'}
           </p>
         </div>
-        {isTeacher && (
-          <Link className="text-link" href="/teacher">
-            前往後臺管理系統 ↗
-          </Link>
-        )}
       </div>
       {error ? (
         <section className="notice error" role="alert">
@@ -115,11 +105,6 @@ export default function StudentDashboard({
             請確認登入 Email
             與老師建立的名冊一致。若已參加工作坊，請洽課程老師協助確認。
           </p>
-          {isTeacher && (
-            <Link className="button" href="/teacher">
-              進入後臺管理系統 ↗
-            </Link>
-          )}
         </section>
       ) : (
         <>

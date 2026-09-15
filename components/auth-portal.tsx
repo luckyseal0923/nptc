@@ -48,6 +48,6 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
     : teacher && user.role !== 'teacher' ? <BackendApplication email={user.email} />
     : teacher ? <BackendWorkspace key={user.email} />
     : !DEMO_MODE && user.role !== 'teacher' && status?.stage !== 'active' ? <StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} />
-    : <div className="workspace"><StudentDashboard isTeacher={user.role === 'teacher'} /></div>}
+    : <div className="workspace"><StudentDashboard /></div>}
   </PortalShell>;
 }
