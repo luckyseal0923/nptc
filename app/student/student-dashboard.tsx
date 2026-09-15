@@ -91,7 +91,7 @@ export default function StudentDashboard({
         </div>
         {isTeacher && (
           <Link className="text-link" href="/teacher">
-            前往老師專區 ↗
+            前往後臺管理系統 ↗
           </Link>
         )}
       </div>
@@ -116,7 +116,7 @@ export default function StudentDashboard({
           </p>
           {isTeacher && (
             <Link className="button" href="/teacher">
-              進入老師專區 ↗
+              進入後臺管理系統 ↗
             </Link>
           )}
         </section>

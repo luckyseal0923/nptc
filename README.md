@@ -69,3 +69,13 @@ node scripts/check-supabase.mjs
 ```
 
 連線檢查只輸出 HTTP 狀態，不顯示金鑰。未登入呼叫已安裝的 RPC 應被拒絕。
+
+## 後臺帳號申請與啟用
+
+執行 `supabase/upgrade-backend-accounts.sql` 後，後臺登入頁提供「申請帳號」。申請者先透過 Email 驗證身分，再填姓名與用途；申請不會自動授予後臺權限。
+
+初始審核管理員為 `chin.wei.chang0923@gmail.com`。登入後在「帳號管理」啟用或停用申請者。一般已啟用帳號可管理所有工作坊，但不能審核其他帳號；審核管理員受保護，不能由此頁停用。停用立即影響後續 RPC，重新啟用不會刪除其既有資料。
+
+Supabase 需啟用 Email 註冊與可用 SMTP，Redirect URLs 需包含 `https://luckyseal0923.github.io/nptc/teacher/` 及 `https://luckyseal0923.github.io/nptc/student/`。既有帳號與申請資料保存在私有 schema，僅透過檢查權限的 RPC 存取。資料庫升級尚未執行時介面會提示設定未完成，不會改用展示資料。
+
+帳號權限回歸測試：先執行 npm install --prefix .verify-accounts --no-package-lock --no-save @electric-sql/pglite，再執行 node tests/backend-accounts.mjs。測試使用隔離 PostgreSQL 引擎，不會連接正式資料庫。

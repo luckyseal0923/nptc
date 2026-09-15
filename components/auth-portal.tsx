@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import TeacherDashboard from '@/app/teacher/teacher-dashboard';
 import StudentDashboard from '@/app/student/student-dashboard';
-import Link from '@/components/link';
+import { BackendApplication, BackendAccounts } from '@/components/backend-accounts';
 import { DEMO_MODE, demoUser } from '@/lib/demo';
 import { rpc, supabase } from '@/lib/supabase';
 import { LoginPanel, PortalShell } from '@/components/portal-shell';
@@ -47,13 +47,9 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
       {!user ? (
         <><LoginPanel teacher={teacher} />{verificationError && <p className="mx-auto -mt-12 max-w-md rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{verificationError}</p>}</>
       ) : teacher && user.role !== 'teacher' ? (
-        <div className="mx-auto max-w-3xl px-6 py-16">
-          <h1 className="text-3xl font-black">此帳號沒有老師權限</h1>
-          <p className="mt-4 text-[#5c7772]">請使用已授權的老師帳號登入。</p>
-          <Link href="/student/" className="mt-7 inline-block rounded-md bg-[#174943] px-4 py-2 text-white">前往學員專區</Link>
-        </div>
+        <BackendApplication email={user.email} />
       ) : teacher ? (
-        <div className="workspace"><TeacherDashboard /></div>
+        <div className="workspace"><BackendAccounts /><TeacherDashboard /></div>
       ) : (
         <div className="workspace"><StudentDashboard isTeacher={user.role === 'teacher'} /></div>
       )}

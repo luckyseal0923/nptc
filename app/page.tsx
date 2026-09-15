@@ -48,7 +48,7 @@ export default function Home() {
           <a href="#about">關於工作坊</a>
           <a href="#features">課程特色</a>
           <a href="#information">開課資訊</a>
-          <Link href="/teacher">老師專區</Link>
+          <Link href="/teacher">後臺管理系統</Link>
         </nav>
         <Link className="login-link" href="/student">
           學員專區 <ArrowUpRight size={17} />

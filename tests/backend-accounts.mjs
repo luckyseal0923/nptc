@@ -1,0 +1,35 @@
+import { PGlite } from '../.verify-accounts/node_modules/@electric-sql/pglite/dist/index.js';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const db = new PGlite();
+await db.exec(`create role anon; create role authenticated; create schema auth; create schema nptc_private;
+create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
+create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('test.uid',true),'')::uuid $$;
+create function auth.jwt() returns jsonb language sql as $$ select jsonb_build_object('email',current_setting('test.email',true)) $$;
+grant usage on schema auth to authenticated,anon;
+create table nptc_private.teachers(email text primary key);
+insert into auth.users values ('00000000-0000-0000-0000-000000000001','chin.wei.chang0923@gmail.com',now()),('00000000-0000-0000-0000-000000000002','applicant@example.test',now());`);
+const sql=readFileSync('supabase/upgrade-backend-accounts.sql','utf8'); await db.exec(sql);
+async function asUser(id,email) {await db.exec('reset role'); await db.query("select set_config('test.uid',$1,false),set_config('test.email',$2,false)",[id,email]);await db.exec('set role authenticated');}
+async function call(name,body) {return (await db.query(`select public.${name}(${body===undefined?'':'$1::jsonb'}) result`,body===undefined?[]:[JSON.stringify(body)])).rows[0].result;}
+await asUser('00000000-0000-0000-0000-000000000002','applicant@example.test');
+assert.equal(await call('nptc_is_teacher'),false);
+assert.equal((await call('nptc_apply_backend_account',{name:'測試申請者',reason:'評分',email:'forged@example.test'})).application.email,'applicant@example.test');
+await assert.rejects(()=>call('nptc_backend_accounts'));
+await assert.rejects(()=>call('nptc_set_backend_account',{email:'applicant@example.test',enabled:true}));
+await assert.rejects(()=>db.query('select * from nptc_private.backend_applications'));
+await asUser('00000000-0000-0000-0000-000000000001','chin.wei.chang0923@gmail.com');
+assert.equal(await call('nptc_is_account_reviewer'),true);
+await call('nptc_set_backend_account',{email:'applicant@example.test',enabled:true});
+await assert.rejects(()=>call('nptc_set_backend_account',{email:'chin.wei.chang0923@gmail.com',enabled:false}));
+await asUser('00000000-0000-0000-0000-000000000002','applicant@example.test');
+assert.equal(await call('nptc_is_teacher'),true); assert.equal(await call('nptc_is_account_reviewer'),false);
+await asUser('00000000-0000-0000-0000-000000000001','chin.wei.chang0923@gmail.com');
+await call('nptc_set_backend_account',{email:'applicant@example.test',enabled:false});
+await asUser('00000000-0000-0000-0000-000000000002','applicant@example.test');
+assert.equal(await call('nptc_is_teacher'),false);
+assert.equal((await call('nptc_apply_backend_account',{name:'再次申請',reason:'測試'})).application.status,'disabled');
+await db.exec('reset role'); await db.exec(sql);
+await asUser('00000000-0000-0000-0000-000000000002','applicant@example.test'); assert.equal(await call('nptc_is_teacher'),false);
+await db.exec('reset role; set role anon'); await assert.rejects(()=>call('nptc_apply_backend_account',{name:'匿名',reason:'測試'}));
+await db.close(); console.log('PASS: verified identity, pending isolation, reviewer-only activation, protected owner, disable, rerun safety, anonymous denial');
