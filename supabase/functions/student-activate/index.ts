@@ -3,6 +3,18 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 // 此檔僅在 Supabase Edge Runtime 執行；service role 不可放入前端。
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const reply = (status: number, message: string) => new Response(JSON.stringify({ message }), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+// 自架環境的 Kong API key 與資料庫 JWT 驗證分開；沿用 Kong key，
+// Authorization 使用共享 JWT_SECRET 簽出的短效服務權杖，不回傳給瀏覽器。
+async function serviceAuthorization() {
+ const secret = Deno.env.get('JWT_SECRET');
+ if (!secret) return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+ const encode = (value: string) => btoa(value).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+ const now = Math.floor(Date.now() / 1000);
+ const input = `${encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${encode(JSON.stringify({ role: 'service_role', iss: 'supabase', iat: now, exp: now + 60 }))}`;
+ const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+ const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(input)));
+ return `${input}.${encode(String.fromCharCode(...signature))}`;
+}
 Deno.serve(async (request: Request) => {
  if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
  if (request.method !== 'POST') return reply(405, '不支援的操作。');
@@ -13,7 +25,7 @@ Deno.serve(async (request: Request) => {
   if (typeof body.name !== 'string' || body.name.length > 100 || typeof body.email !== 'string' || body.email.length > 254 ||
    typeof body.phone !== 'string' || !/^09\d{8}$/.test(body.phone) || typeof body.code !== 'string' || !/^[a-f0-9]{64}$/.test(body.code) ||
    typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 128) return reply(400, '請完整填寫有效資料與至少八個字元的密碼。');
-  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } });
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { global: { headers: { Authorization: `Bearer ${await serviceAuthorization()}` } }, auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await admin.rpc('nptc_consume_student_invitation', { body: { name: body.name.trim(), email: body.email.trim().toLowerCase(), phone: body.phone, code: body.code } });
   if (error) { console.error('Invitation RPC failed:', error.code, error.message); return reply(503, '啟用服務暫時無法使用，請聯絡管理員。'); }
   if (!data?.ok) return reply(400, '資料或啟用碼不符、已過期，或此帳號已存在。請確認或聯絡管理員。');
