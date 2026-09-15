@@ -34,9 +34,9 @@ export function StudentLogin() {
         const password = passwordFrom(fields);
         const { error } = await supabase.functions.invoke('student-activate', { body: {
           email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
-          code: String(fields.get('code')).trim(), password,
+          password,
         } });
-        if (error) throw new Error('啟用未完成，請確認名冊資料及啟用碼；若已建立帳號，請改用學員登入。');
+        if (error) throw new Error('啟用未完成，請確認姓名、Email 與手機；若已建立帳號，請改用學員登入。');
         sessionStorage.setItem('nptc-password-created', email.toLowerCase());
         const login = await supabase.auth.signInWithPassword({ email, password });
         if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
@@ -52,10 +52,10 @@ export function StudentLogin() {
     <div className="grid gap-4 sm:grid-cols-2">{(['activate', 'login'] as const).map(value => <button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() => { setMode(value); setError(''); setSent(''); }} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}><strong className="block text-xl">{value === 'activate' ? '首次啟用帳號' : '學員登入'}</strong><span className="mt-2 block text-sm">{value === 'activate' ? '核對姓名、Email、手機，建立登入密碼' : '使用已設定的 Email 與密碼登入'}</span></button>)}</div>
     <form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8">
       <h2 className="text-xl font-bold">{mode === 'activate' ? '首次啟用帳號' : mode === 'reset' ? '忘記密碼' : '學員登入'}</h2>
-      {mode === 'activate' && <><p className="text-sm">填寫報名資料與管理員提供的一次性啟用碼，再設定登入密碼，不需要收驗證信。</p><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /></label></>}
+      {mode === 'activate' && <><p className="text-sm">填寫後台名冊登錄的姓名、Email 與手機，並設定登入密碼。資料核對成功後即可建立帳號，不需要驗證信。</p><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /></label></>}
       <label className="block">Email<Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /></label>
       {mode === 'activate' && <label className="block">手機電話<Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /></label>}
-      {mode === 'activate' && <><label className="block">一次性啟用碼<Input className="mt-2 h-12 px-3 md:text-base" name="code" autoComplete="off" minLength={64} maxLength={64} required /></label><PasswordFields /></>}
+      {mode === 'activate' && <PasswordFields />}
       {mode === 'login' && <label className="block">密碼<Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /></label>}
       {error && <p role="alert" className="text-red-700">{error}</p>}{sent && <p role="status" className="rounded bg-green-50 p-3">{sent}</p>}
       <div className="flex flex-wrap items-center gap-5"><Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}>{mode === 'reset' ? '返回登入' : '忘記密碼？'}</button></div>
