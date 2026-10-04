@@ -15,6 +15,36 @@ import { formatScore, maskPhone, validateGrade, workshopStations, type Student, 
 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
 
+class TeacherDataTimeout extends Error {}
+const TEACHER_DATA_TIMEOUT_MS = 12000;
+
+async function readTeacherData(id?: string, parentSignal?: AbortSignal): Promise<Data> {
+  if (parentSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const controller = new AbortController();
+  let timedOut = false;
+  let rejectStop: (reason: Error) => void = () => {};
+  const stopped = new Promise<never>((_, reject) => { rejectStop = reject; });
+  const onAbort = () => { controller.abort(); rejectStop(new DOMException('Aborted', 'AbortError')); };
+  parentSignal?.addEventListener('abort', onAbort, { once: true });
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+    rejectStop(new TeacherDataTimeout('資料載入逾時。'));
+  }, TEACHER_DATA_TIMEOUT_MS);
+  try {
+    return await Promise.race([
+      rpc<Data>('nptc_teacher_data', { requested_workshop: id || null }, controller.signal),
+      stopped,
+    ]);
+  } catch (cause) {
+    if (timedOut) throw new TeacherDataTimeout('資料載入逾時。');
+    throw cause;
+  } finally {
+    window.clearTimeout(timer);
+    parentSignal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops = false }: { onWorkshopChange?: (id: string) => void; canManageWorkshops?: boolean } = {}) {
   const [data, setData] = useState<Data | null>(null);
   useEffect(() => { if (data?.selected?.id) onWorkshopChange?.(data.selected.id); }, [data?.selected?.id, onWorkshopChange]);
@@ -22,6 +52,7 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
   const sortedRoster = sortRoster(data?.students ?? [], rosterSort);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [loadingNotice, setLoadingNotice] = useState('');
   const [message, setMessage] = useState('');
   const [editing, setEditing] = useState<Student | null>(null);
   const [tab, setTab] = useState('roster');
@@ -36,8 +67,21 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
   const selectedThreshold = data?.thresholds.find((item) => item.key === scoreStation);
 
   async function load(id?: string, signal?: AbortSignal) {
-    const result = await rpc<Data>('nptc_teacher_data', { requested_workshop: id || null }, signal);
+    setLoadingNotice('');
+    let result: Data;
+    try {
+      result = await readTeacherData(id, signal);
+    } catch (cause) {
+      if (!(cause instanceof TeacherDataTimeout) || signal?.aborted) throw cause;
+      setLoadingNotice('第一次請求逾時，正在重新連線…');
+      try { result = await readTeacherData(id, signal); }
+      catch (retryCause) {
+        if (retryCause instanceof TeacherDataTimeout) throw new Error('資料連續兩次載入逾時，請檢查網路或稍後按「重新載入」。');
+        throw retryCause;
+      }
+    }
     setData(result);
+    setLoadingNotice('');
     setEditing(null);
     setStationDrafts(null);
     return result;
@@ -96,7 +140,7 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
     setTab(next); setEditing(null); setError(''); setMessage('');
   }
 
-  if (!data) return <section className="portal-panel"><p>{error ? '課程資料載入失敗' : '正在載入教學評量資料…'}</p>{error && <><p role="alert" className="notice error">{error}</p><Button type="button" disabled={busy} className="action" onClick={() => changeWorkshop('')}>{busy ? '載入中…' : '重新載入'}</Button></>}</section>;
+  if (!data) return <section className="portal-panel"><p role="status">{error ? '課程資料載入失敗' : loadingNotice || '正在載入教學評量資料…'}</p>{error && <><p role="alert" className="notice error">{error}</p><Button type="button" disabled={busy} className="action" onClick={() => changeWorkshop('')}>{busy ? '載入中…' : '重新載入'}</Button></>}</section>;
   if (!data.selected) return <section className="empty-panel"><h2>先建立第一個工作坊梯次</h2><p>每個梯次會各自管理名冊、題目、成績與邊緣及格分數。</p><form className="entry-form" onSubmit={async event => {
     event.preventDefault();
     const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
