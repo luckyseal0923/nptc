@@ -74,7 +74,13 @@ node scripts/check-supabase.mjs
 
 執行 `supabase/upgrade-backend-accounts.sql` 後，後臺登入頁提供「申請帳號」。申請者先透過 Email 驗證身分，再填姓名與用途；申請不會自動授予後臺權限。
 
-初始審核管理員為 `chin.wei.chang0923@gmail.com`。登入後在「帳號管理」啟用或停用申請者。一般已啟用帳號可管理所有工作坊，但不能審核其他帳號；審核管理員受保護，不能由此頁停用。停用立即影響後續 RPC，重新啟用不會刪除其既有資料。
+初始系統管理者為既有審核帳號。登入後可在「帳號管理」啟用或停用申請者。一般已啟用帳號可管理所有工作坊，但不能審核其他帳號。停用立即影響後續 RPC，重新啟用不會刪除其既有資料。
+
+### 後臺兩級權限與梯次封存
+
+在上述升級及 `supabase/upgrade-domain-scores.sql`、`supabase/upgrade-roster-account-status.sql` 完成後，執行 `supabase/upgrade-admin-roles.sql`。一般管理員可建立梯次、管理學員名冊與題目、登錄與公布成績；系統管理者額外可編輯帳號姓名與申請用途、啟用或停用帳號、升降系統管理者權限，以及封存或還原梯次。新啟用帳號預設為一般管理員。初始系統管理者不得被降權或停用，管理者也不能自行降權或停用。
+
+封存取代永久刪除：已封存梯次會從後臺日常清單移除，保留學員、題目與成績，且無法再修改；系統管理者可在「帳號管理」頁還原。先前已公布的成績仍可由原學員查看。此升級需在正式 Supabase SQL Editor 執行後才會生效；本機建置與測試不代表正式環境已更新。權限及封存回歸測試：`node tests/admin-roles.mjs`。
 
 Supabase 需啟用 Email 註冊與可用 SMTP，Redirect URLs 需包含 `https://luckyseal0923.github.io/nptc/teacher/` 及 `https://luckyseal0923.github.io/nptc/student/`。既有帳號與申請資料保存在私有 schema，僅透過檢查權限的 RPC 存取。資料庫升級尚未執行時介面會提示設定未完成，不會改用展示資料。
 

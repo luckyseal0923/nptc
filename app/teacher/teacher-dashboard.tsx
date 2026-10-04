@@ -15,7 +15,7 @@ import { formatScore, maskPhone, validateGrade, workshopStations, type Student, 
 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
 
-export default function TeacherDashboard({ onWorkshopChange }: { onWorkshopChange?: (id: string) => void } = {}) {
+export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops = false }: { onWorkshopChange?: (id: string) => void; canManageWorkshops?: boolean } = {}) {
   const [data, setData] = useState<Data | null>(null);
   useEffect(() => { if (data?.selected?.id) onWorkshopChange?.(data.selected.id); }, [data?.selected?.id, onWorkshopChange]);
   const [rosterSort, setRosterSort] = useState<RosterSort>('original');
@@ -85,6 +85,13 @@ export default function TeacherDashboard({ onWorkshopChange }: { onWorkshopChang
     if (!window.confirm(`確定要刪除學員「${student.name}」嗎？此操作無法復原。`)) return;
     await save({ action: 'deleteStudent', id: student.id, revision: student.revision }, `學員「${student.name}」已刪除。`);
   }
+  async function archiveWorkshop() {
+    const selected = data?.selected;
+    if (!selected || !window.confirm(`確定封存「${selected.name}」？名冊與成績會保留，可由系統管理者還原。`)) return;
+    setBusy(true); setError(''); setMessage('');
+    try { await rpc('nptc_set_workshop_archived', { body: { workshopId: selected.id, archived: true } }); await load(); setMessage(`「${selected.name}」已封存。`); }
+    catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
+  }
   function changeTab(next: string) {
     setTab(next); setEditing(null); setError(''); setMessage('');
   }
@@ -114,6 +121,7 @@ export default function TeacherDashboard({ onWorkshopChange }: { onWorkshopChang
       </label>
       <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>{stations.length}</b> 個 OSCE 題目</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公告' : '成績未公告'}</span></div>
       <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
+      {canManageWorkshops && <Button className="action secondary" disabled={busy} onClick={archiveWorkshop}>封存此梯次</Button>}
     </section>
     {showCreate && <form className="create-workshop-card" onSubmit={async (event) => {
       event.preventDefault(); const form = event.currentTarget; const name = new FormData(form).get('name');

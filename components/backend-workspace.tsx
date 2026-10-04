@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import TeacherDashboard from '@/app/teacher/teacher-dashboard';
-import { BackendAccounts } from '@/components/backend-accounts';
+import { ArchivedWorkshops, BackendAccounts } from '@/components/backend-accounts';
 import { rpc } from '@/lib/supabase';
 import { DEMO_MODE } from '@/lib/demo';
 
@@ -33,8 +33,8 @@ export function BackendWorkspace() {
         onClick={() => setPage(value)}>{value === 'courses' ? '課程與成績管理' : value === 'analysis' ? '學習分析儀表板' : '帳號管理'}</button>)}
     </>, navigation)}
     {error && <p role="alert" className="mb-4 text-sm">{error} <button type="button" className="underline" onClick={() => setRetry(v => v + 1)}>重新確認</button></p>}
-    <section id="backend-courses" aria-label="課程與成績管理" hidden={page !== 'courses'}><TeacherDashboard onWorkshopChange={setCurrentWorkshopId} /></section>
+    <section id="backend-courses" aria-label="課程與成績管理" hidden={page !== 'courses'}><TeacherDashboard onWorkshopChange={setCurrentWorkshopId} canManageWorkshops={canReview} /></section>
     <section id="backend-analysis" aria-label="學習分析儀表板" hidden={page !== 'analysis'}>{page === 'analysis' && <Suspense fallback={<p role="status">正在載入學習分析…</p>}><LearningAnalysis currentWorkshopId={currentWorkshopId}/></Suspense>}</section>
-    {canReview && <section id="backend-accounts" aria-label="帳號管理" hidden={page !== 'accounts'}>{page === 'accounts' && <BackendAccounts expanded />}</section>}
+    {canReview && <section id="backend-accounts" aria-label="帳號管理" hidden={page !== 'accounts'}>{page === 'accounts' && <><BackendAccounts expanded /><ArchivedWorkshops /></>}</section>}
   </div>;
 }
