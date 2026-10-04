@@ -2,6 +2,7 @@ import { DomainRadar } from '@/components/domain-radar';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Users, RefreshCw, ArrowLeft, Search } from 'lucide-react';
 import { rpc } from '@/lib/supabase';
+import { retryingRequest } from '@/lib/retrying-request';
 import { background, dimensions, distribution, enrollments, learners, loadAnalysis, statistics, timeline, type AnalysisData, type Dimension, type Exam } from '@/lib/learning-analysis';
 import '@/app/learning-analysis.css';
 
@@ -13,17 +14,23 @@ const emptyFilters: Record<Dimension,string> = { hospital:'',unit:'',exam_specia
 export default function LearningAnalysis({ currentWorkshopId, onWorkshopChange }: { currentWorkshopId?: string; onWorkshopChange?: (id: string) => void }) {
   const [data,setData] = useState<AnalysisData[] | null>(null);
   const [error,setError] = useState('');
+  const [retrying,setRetrying] = useState(false);
   const [version,setVersion] = useState(0);
   useEffect(()=>{
     const controller = new AbortController();
-    setData(null); setError('');
-    loadAnalysis(id=>rpc<AnalysisData>('nptc_teacher_data',{requested_workshop:id ?? null},controller.signal))
-      .then(result=>{if(!controller.signal.aborted)setData(result);})
-      .catch(cause=>{if(!controller.signal.aborted)setError(cause instanceof Error ? cause.message : '資料載入失敗');});
-    return ()=>controller.abort();
+    let deadlineReached = false;
+    const deadline = setTimeout(()=>{deadlineReached=true;controller.abort();setError('完整分析資料載入超過 24 秒，請按「重新載入」再試。');},24000);
+    setData(null); setError(''); setRetrying(false);
+    loadAnalysis(id=>retryingRequest(
+      requestSignal=>rpc<AnalysisData>('nptc_teacher_data',{requested_workshop:id ?? null},requestSignal),
+      {signal:controller.signal,onRetry:()=>setRetrying(true)},
+    ))
+      .then(result=>{if(!controller.signal.aborted){clearTimeout(deadline);setRetrying(false);setData(result);}})
+      .catch(cause=>{clearTimeout(deadline);if(!controller.signal.aborted || deadlineReached)setError(deadlineReached ? '完整分析資料載入超過 24 秒，請按「重新載入」再試。' : cause instanceof Error ? cause.message : '資料載入失敗');});
+    return ()=>{clearTimeout(deadline);controller.abort();};
   },[version]);
   return <>
-    {data === null ? <div className="analysis-state" role={error ? 'alert' : 'status'}><BarChart3 size={32}/><h1>學習分析</h1><p>{error ? `無法取得完整分析資料：${error}` : '正在彙整各梯次名冊與成績…'}</p>{error && <button className="action" onClick={()=>setVersion(v=>v+1)}>重新載入</button>}</div>
+    {data === null ? <div className="analysis-state" role={error ? 'alert' : 'status'}><BarChart3 size={32}/><h1>學習分析</h1><p>{error ? `無法取得完整分析資料：${error}` : retrying ? '第一次請求逾時，正在重新連線並彙整資料…' : '正在彙整各梯次名冊與成績…'}</p>{error && <button className="action" onClick={()=>setVersion(v=>v+1)}>重新載入</button>}</div>
     : <AnalysisView data={data} currentWorkshopId={currentWorkshopId} onWorkshopChange={onWorkshopChange} onRefresh={()=>setVersion(v=>v+1)}/>}
   </>;
 }

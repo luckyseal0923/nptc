@@ -4,6 +4,7 @@ import { RosterSortSelect } from '@/components/roster-sort-select';
 import { sortRoster, type RosterSort } from '@/lib/roster-sort';
 import { RosterStudentName } from '@/components/roster-student';
 import { rpc } from '@/lib/supabase';
+import { retryingRequest } from '@/lib/retrying-request';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from '@/components/link';
@@ -14,36 +15,6 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { formatScore, maskPhone, validateGrade, workshopStations, type Student, type StationDefinition, type Workshop, type Threshold } from '@/lib/grading';
 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
-
-class TeacherDataTimeout extends Error {}
-const TEACHER_DATA_TIMEOUT_MS = 12000;
-
-async function readTeacherData(id?: string, parentSignal?: AbortSignal): Promise<Data> {
-  if (parentSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  const controller = new AbortController();
-  let timedOut = false;
-  let rejectStop: (reason: Error) => void = () => {};
-  const stopped = new Promise<never>((_, reject) => { rejectStop = reject; });
-  const onAbort = () => { controller.abort(); rejectStop(new DOMException('Aborted', 'AbortError')); };
-  parentSignal?.addEventListener('abort', onAbort, { once: true });
-  const timer = window.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-    rejectStop(new TeacherDataTimeout('資料載入逾時。'));
-  }, TEACHER_DATA_TIMEOUT_MS);
-  try {
-    return await Promise.race([
-      rpc<Data>('nptc_teacher_data', { requested_workshop: id || null }, controller.signal),
-      stopped,
-    ]);
-  } catch (cause) {
-    if (timedOut) throw new TeacherDataTimeout('資料載入逾時。');
-    throw cause;
-  } finally {
-    window.clearTimeout(timer);
-    parentSignal?.removeEventListener('abort', onAbort);
-  }
-}
 
 export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops = false }: { onWorkshopChange?: (id: string) => void; canManageWorkshops?: boolean } = {}) {
   const [data, setData] = useState<Data | null>(null);
@@ -68,19 +39,12 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
 
   async function load(id?: string, signal?: AbortSignal) {
     setLoadingNotice('');
-    let result: Data;
-    try {
-      result = await readTeacherData(id, signal);
-    } catch (cause) {
-      if (!(cause instanceof TeacherDataTimeout) || signal?.aborted) throw cause;
-      setLoadingNotice('第一次請求逾時，正在重新連線…');
-      try { result = await readTeacherData(id, signal); }
-      catch (retryCause) {
-        if (retryCause instanceof TeacherDataTimeout) throw new Error('資料連續兩次載入逾時，請檢查網路或稍後按「重新載入」。');
-        throw retryCause;
-      }
-    }
+    const result = await retryingRequest(
+      requestSignal => rpc<Data>('nptc_teacher_data', { requested_workshop: id || null }, requestSignal),
+      { signal, onRetry: () => setLoadingNotice('第一次請求逾時，正在重新連線…') },
+    );
     setData(result);
+    setError('');
     setLoadingNotice('');
     setEditing(null);
     setStationDrafts(null);
