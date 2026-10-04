@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
 
 type Account = { email: string; name: string; reason: string; status: 'pending' | 'active' | 'disabled'; protected?: boolean; systemAdmin?: boolean };
 type Status = { application: Account | null; canReview: boolean };
@@ -88,13 +89,14 @@ export function ArchivedWorkshops() {
   const [items, setItems] = useState<ArchivedWorkshop[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
   async function load() {
     try { setError(''); setItems(await rpc<ArchivedWorkshop[]>('nptc_archived_workshops')); }
     catch (cause) { setError((cause as Error).message); }
   }
   useEffect(() => { void load(); }, []);
   return <section className="data-panel" style={{ marginTop: 24 }}><div className="panel-heading"><h2>已封存梯次</h2><Button className="action secondary" onClick={load}>重新整理</Button></div>
-    <p className="form-help">封存會保留名冊與成績，並停止修改。還原後會重新出現在梯次清單。</p>
+    <p className="form-help">封存會保留名冊與成績，並停止修改。還原後會重新出現在梯次清單；永久刪除會移除該梯次及其名冊、成績與回饋。</p>
     {error && <p role="alert" className="notice error">{error}</p>}
     {!items.length ? <p>目前沒有已封存梯次。</p> : <div className="station-settings-grid">{items.map(item => <article className="station-setting" key={item.id}>
       <h3>{item.name}</h3><p className="form-help">封存時間：{new Date(item.archivedAt).toLocaleString('zh-TW')}</p>
@@ -103,6 +105,8 @@ export function ArchivedWorkshops() {
         try { await rpc('nptc_set_workshop_archived', { body: { workshopId: item.id, archived: false } }); await load(); }
         catch(cause) { setError((cause as Error).message); } finally { setBusy(false); }
       }}>還原梯次</Button>
+      <Button className="action destructive" disabled={busy} onClick={() => setDeleting(deleting === item.id ? null : item.id)}>{deleting === item.id ? '取消刪除' : '永久刪除'}</Button>
+      {deleting === item.id && <ConfirmWorkshopAction action="delete" workshop={item} onCancel={() => setDeleting(null)} onSuccess={async () => { setDeleting(null); await load(); }}/>}
     </article>)}</div>}
   </section>;
 }

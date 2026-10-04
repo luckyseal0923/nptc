@@ -6,7 +6,11 @@ const db = new PGlite();
 await db.exec(`create role anon; create role authenticated; create schema auth;
 create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,encrypted_password text);
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
-create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;
+create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object(
+ 'email',current_setting('test.email',true),
+ 'session_id',nullif(current_setting('test.session_id',true),''),
+ 'amr',case when nullif(current_setting('test.amr_timestamp',true),'') is null then '[]'::jsonb
+  else jsonb_build_array(jsonb_build_object('method','password','timestamp',current_setting('test.amr_timestamp',true)::double precision)) end)$$;
 grant usage on schema auth to authenticated,anon;`);
 for (const file of ['setup','upgrade-workshop-management','upgrade-score-feedback','upgrade-student-phone','upgrade-student-profile','upgrade-dynamic-osce-stations','upgrade-backend-accounts','upgrade-student-activation','upgrade-roster-account-status','upgrade-domain-scores','upgrade-admin-roles']) {
   await db.exec(readFileSync(`supabase/${file}.sql`, 'utf8'));
@@ -53,5 +57,23 @@ assert.equal(await call('nptc_is_account_reviewer'),false);
 await assert.rejects(()=>call('nptc_archived_workshops'));
 await db.exec('reset role');
 await db.exec(readFileSync('supabase/upgrade-admin-roles.sql','utf8'));
+await db.exec(readFileSync('supabase/upgrade-workshop-sensitive-actions.sql','utf8'));
+await asUser(root,'chin.wei.chang0923@gmail.com');
+await assert.rejects(()=>call('nptc_set_workshop_archived',{workshopId:workshop,archived:true}),/重新輸入/);
+async function freshSession(id) {
+ await db.exec('reset role');
+ await db.query("select set_config('test.session_id',$1,false),set_config('test.amr_timestamp',extract(epoch from now())::text,false)",[id]);
+ await db.exec('set role authenticated');
+}
+await freshSession('fresh-archive');
+await assert.rejects(()=>call('nptc_delete_archived_workshop',{workshopId:workshop,name:'測試梯次'}),/只能刪除已封存/);
+await call('nptc_set_workshop_archived',{workshopId:workshop,archived:true});
+await assert.rejects(()=>call('nptc_delete_archived_workshop',{workshopId:workshop,name:'測試梯次'}),/已使用/);
+await freshSession('fresh-delete');
+await assert.rejects(()=>call('nptc_delete_archived_workshop',{workshopId:workshop,name:'名稱錯誤'}),/名稱不符/);
+await call('nptc_delete_archived_workshop',{workshopId:workshop,name:'測試梯次'});
+await db.exec('reset role');
+assert.equal((await db.query('select count(*)::int n from nptc_private.workshops where id=$1',[workshop])).rows[0].n,0);
+assert.equal((await db.query('select count(*)::int n from nptc_private.station_grades')).rows[0].n,0);
 await db.close();
-console.log('PASS: role promotion and demotion, account edit, workshop archive and restore, RPC authorization');
+console.log('PASS: admin roles, archive and restore, fresh password requirement, one-use sessions, archived-only deletion and cascade');

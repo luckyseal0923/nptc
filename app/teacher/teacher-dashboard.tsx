@@ -3,6 +3,7 @@ import { DomainMaxFields, DomainGradeFields } from '@/components/domain-score-fi
 import { RosterSortSelect } from '@/components/roster-sort-select';
 import { sortRoster, type RosterSort } from '@/lib/roster-sort';
 import { RosterStudentName } from '@/components/roster-student';
+import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
 import { rpc } from '@/lib/supabase';
 import { retryingRequest } from '@/lib/retrying-request';
 import { useEffect, useState } from 'react';
@@ -28,6 +29,7 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
   const [editing, setEditing] = useState<Student | null>(null);
   const [tab, setTab] = useState('roster');
   const [showCreate, setShowCreate] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const [scoreStation, setScoreStation] = useState('q1');
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
   const [stationDrafts, setStationDrafts] = useState<StationDefinition[] | null>(null);
@@ -93,13 +95,6 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
     if (!window.confirm(`確定要刪除學員「${student.name}」嗎？此操作無法復原。`)) return;
     await save({ action: 'deleteStudent', id: student.id, revision: student.revision }, `學員「${student.name}」已刪除。`);
   }
-  async function archiveWorkshop() {
-    const selected = data?.selected;
-    if (!selected || !window.confirm(`確定封存「${selected.name}」？名冊與成績會保留，可由系統管理者還原。`)) return;
-    setBusy(true); setError(''); setMessage('');
-    try { await rpc('nptc_set_workshop_archived', { body: { workshopId: selected.id, archived: true } }); await load(); setMessage(`「${selected.name}」已封存。`); }
-    catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
-  }
   function changeTab(next: string) {
     setTab(next); setEditing(null); setError(''); setMessage('');
   }
@@ -129,8 +124,14 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
       </label>
       <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>{stations.length}</b> 個 OSCE 題目</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公告' : '成績未公告'}</span></div>
       <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
-      {canManageWorkshops && <Button className="action secondary" disabled={busy} onClick={archiveWorkshop}>封存此梯次</Button>}
+      {canManageWorkshops && <Button className="action secondary" disabled={busy} onClick={() => setShowArchive(value => !value)}>{showArchive ? '取消封存' : '封存此梯次'}</Button>}
     </section>
+    {showArchive && canManageWorkshops && <section className="create-workshop-card"><ConfirmWorkshopAction key={data.selected.id} action="archive" workshop={data.selected} onCancel={() => setShowArchive(false)} onSuccess={async () => {
+      const name = data.selected!.name;
+      setShowArchive(false);
+      await load();
+      setMessage(`「${name}」已封存。`);
+    }}/></section>}
     {showCreate && <form className="create-workshop-card" onSubmit={async (event) => {
       event.preventDefault(); const form = event.currentTarget; const name = new FormData(form).get('name');
       if (await save({ action: 'createWorkshop', name }, '新梯次已建立。')) { form.reset(); setShowCreate(false); }
