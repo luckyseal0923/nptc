@@ -100,6 +100,7 @@ export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
         try { await rpc('nptc_update_backend_account', { body: { email: account.email, name: fields.get('name'), reason: fields.get('reason') } }); setEditing(null); await load(); }
         catch(e) { setError((e as Error).message); } finally { setBusy(false); }
       }}><fieldset disabled={busy}><label>姓名<Input name="name" required maxLength={100} defaultValue={account.name} /></label><label>申請用途<Input name="reason" required maxLength={500} defaultValue={account.reason} /></label><Button className="action" type="submit">儲存修改</Button></fieldset></form>}
+      <div className="account-card-actions">
       <Button className="action secondary" disabled={busy} onClick={() => setEditing(editing === account.email ? null : account.email)}>{editing === account.email ? '取消修改' : '修改資料'}</Button>
       {account.status === 'active' && !account.protected && <Button className="action secondary" disabled={busy} onClick={async () => {
         setBusy(true); setError('');
@@ -111,6 +112,7 @@ export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
         try { await rpc('nptc_set_backend_account', { body: { email: account.email, enabled: account.status !== 'active' } }); await load(); }
         catch(e) { setError((e as Error).message); } finally { setBusy(false); }
       }}>{account.status === 'active' ? '停用帳號' : '啟用帳號'}</Button>}
+      </div>
     </article>)}</div></>}
   </section>;
 }
