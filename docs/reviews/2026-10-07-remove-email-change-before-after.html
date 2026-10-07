@@ -1,0 +1,678 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>移除變更登入 Email：程式修改對照</title><style>body{max-width:1100px;margin:40px auto;padding:20px;font:16px/1.7 sans-serif}pre{white-space:pre-wrap;padding:20px;background:#f1f5f3;font:13px/1.6 monospace}summary{cursor:pointer;padding:10px;background:#eaf2df}</style><h1>移除學員變更登入 Email 介面</h1><p>移除按鈕、表單與未使用元件。以下提供各檔案完整修改前後內容。</p><h2>app/student/student-dashboard.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { DomainRadar } from '@/components/domain-radar';
+import { rpc } from '@/lib/supabase';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+import { StudentEmailChange } from '@/components/student-email-change';
+('use client');
+import { useEffect, useState } from 'react';
+import {
+  formatScore,
+  gradeStatus,
+  maskPhone,
+  type StationDefinition,
+  type Grade,
+  type Threshold,
+} from '@/lib/grading';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+type RecordItem = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  workshopName: string;
+  published: number;
+  archived?: boolean;
+  updatedAt: string | null;
+  grades: (Grade &amp; { key: string; feedback?: string | null })[];
+  thresholds: Threshold[];
+  stations?: StationDefinition[];
+  profile?: { nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
+};
+export default function StudentDashboard({ canChangeEmail = true }: { canChangeEmail?: boolean } = {}) {
+  const [records, setRecords] = useState&lt;RecordItem[] | null&gt;(null),
+    [selected, setSelected] = useState(''),
+    [error, setError] = useState(''),
+    [profileBusy, setProfileBusy] = useState(false),
+    [hospitalError, setHospitalError] = useState(''),
+    [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]),
+    [hospitalLoading, setHospitalLoading] = useState(true);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data', {}, abort.signal)
+      .then((data) =&gt; {
+        setRecords(data.records);
+      })
+      .catch((e) =&gt; {
+        if (e.name !== 'AbortError') setError(e.message);
+      });
+    return () =&gt; abort.abort();
+  }, []);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},abort.signal)
+      .then(data=&gt;setHospitals(data.hospitals))
+      .catch(cause=&gt;{if(cause.name!=='AbortError')setHospitalError('官方醫院名冊暫時無法載入，個人資料暫時無法更新。');})
+      .finally(()=&gt;setHospitalLoading(false));
+    return () =&gt; abort.abort();
+  }, []);
+  const record = records?.find((r) =&gt; r.id === selected) ?? records?.[0];
+  async function saveProfile(form: HTMLFormElement) {
+    const fields = new FormData(form);
+    setProfileBusy(true); setError('');
+    try {
+      const hospital = String(fields.get('hospital') ?? '');
+      if (!hospitals.some((item) =&gt; item.name === hospital)) throw new Error('請由政府醫院名冊的搜尋結果選擇服務醫院全名。');
+      await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit') ?? ''), examSpecialty: String(fields.get('examSpecialty') ?? ''), firstOsce: fields.get('firstOsce') === 'yes', birthDate: String(fields.get('birthDate') ?? '') } });
+      const data = await rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data'); setRecords(data.records);
+    } catch (cause) { setError((cause as Error).message); } finally { setProfileBusy(false); }
+  }
+  return (
+    &lt;&gt;
+      &lt;div className="dashboard-title"&gt;
+        &lt;div&gt;
+          &lt;h1&gt;我的 OSCE 成績&lt;/h1&gt;
+          &lt;p&gt;
+            {record
+              ? `${record.name}，回顧每一次練習，整理下一步的方向。`
+              : '回顧每一次練習，整理下一步的方向。'}
+          &lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      {hospitalError &amp;&amp; &lt;p role="alert" className="notice"&gt;{hospitalError}&lt;/p&gt;}
+      {error ? (
+        &lt;section className="notice error" role="alert"&gt;
+          &lt;p&gt;{error}&lt;/p&gt;
+          &lt;Button className="action" onClick={() =&gt; location.reload()}&gt;
+            重新載入
+          &lt;/Button&gt;
+        &lt;/section&gt;
+      ) : !records ? (
+        &lt;p className="empty-panel" role="status"&gt;
+          正在載入你的學習紀錄…
+        &lt;/p&gt;
+      ) : !record ? (
+        &lt;section className="empty-panel"&gt;
+          &lt;span className="section-label"&gt;YOUR RECORDS&lt;/span&gt;
+          &lt;h2&gt;目前尚無工作坊紀錄&lt;/h2&gt;
+          &lt;p&gt;
+            請確認登入 Email
+            與老師建立的名冊一致。若已參加工作坊，請洽課程老師協助確認。
+          &lt;/p&gt;
+        &lt;/section&gt;
+      ) : (
+        &lt;&gt;
+          &lt;div className="workshop-toolbar"&gt;
+            &lt;label&gt;
+              工作坊梯次
+              &lt;NativeSelect
+                value={record.id}
+                onChange={(e) =&gt; setSelected(e.target.value)}
+              &gt;
+                {records.map((r) =&gt; (
+                  &lt;NativeSelectOption key={r.id} value={r.id}&gt;
+                    {r.workshopName}
+                  &lt;/NativeSelectOption&gt;
+                ))}
+              &lt;/NativeSelect&gt;
+            &lt;/label&gt;
+            &lt;span className="identity-pill"&gt;手機電話 {maskPhone(record.phone)}&lt;/span&gt;
+          &lt;/div&gt;
+          {!record.archived &amp;&amp; (!record.profile?.hospital || record.profile.firstOsce === null) ? &lt;section className="data-panel student-profile"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;FIRST LOGIN&lt;/span&gt;&lt;h2&gt;完成個人資料&lt;/h2&gt;&lt;p className="form-help"&gt;姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。服務醫院請由政府名冊搜尋並點選全名。&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;form onSubmit={(event) =&gt; { event.preventDefault(); saveProfile(event.currentTarget); }}&gt;&lt;fieldset disabled={profileBusy || hospitalLoading || !!hospitalError}&gt;&lt;div className="profile-grid"&gt;&lt;label&gt;姓名&lt;Input value={record.name} disabled /&gt;&lt;/label&gt;&lt;label&gt;Email&lt;Input value={record.email ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input value={record.phone ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;護理年資（年）&lt;Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /&gt;&lt;/label&gt;&lt;HospitalPicker defaultValue={record.profile?.hospital ?? ''} hospitals={hospitals} loading={hospitalLoading} /&gt;&lt;label&gt;服務單位&lt;Input name="unit" required maxLength={100} defaultValue={record.profile?.unit ?? ''} /&gt;&lt;/label&gt;&lt;label&gt;報考科別&lt;NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) =&gt; &lt;NativeSelectOption value={item} key={item}&gt;{item}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;是否首次報考國家 OSCE&lt;NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="yes"&gt;是&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="no"&gt;否&lt;/NativeSelectOption&gt;&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;出生年月日&lt;Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /&gt;&lt;/label&gt;&lt;/div&gt;&lt;Button className="action" type="submit"&gt;{profileBusy ? '儲存中…' : '儲存個人資料'}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;&lt;/section&gt; : &lt;section className="profile-summary"&gt;&lt;span&gt;{record.archived ? '已封存梯次，保留當時背景資料' : '個人資料已完成'}&lt;/span&gt;&lt;strong&gt;{record.profile?.examSpecialty ? `${record.profile.examSpecialty}專科護理師` : '背景資料未完整登錄'}&lt;/strong&gt;&lt;p&gt;{record.profile?.hospital || '未登錄醫院'} · {record.profile?.unit || '未登錄單位'} · 護理年資 {record.profile?.nursingYears ?? '未登錄'} 年&lt;/p&gt;&lt;/section&gt;}
+          {canChangeEmail &amp;&amp; &lt;StudentEmailChange email={record.email}/&gt;}
+          {!record.published ? (
+            &lt;section className="empty-panel"&gt;
+              &lt;h2&gt;本梯次成績尚未公布&lt;/h2&gt;
+              &lt;p&gt;老師確認成績後，將於此頁開放查詢，請留意課程通知。&lt;/p&gt;
+            &lt;/section&gt;
+          ) : (
+            &lt;&gt;
+              &lt;div className="student-summary"&gt;
+                &lt;div&gt;
+                  &lt;span&gt;評量紀錄&lt;/span&gt;
+                  &lt;strong&gt;
+                    {record.grades.filter((g) =&gt; g.score !== null).length}
+                    &lt;small&gt; / {record.stations?.length ?? 0} 題已登錄&lt;/small&gt;
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;div&gt;
+                  &lt;span&gt;各題及格標準&lt;/span&gt;
+                  &lt;strong&gt;
+                    邊緣及格分數
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;p&gt;
+                  各題得分達該題邊緣及格分數即為及格，未達者以紅字顯示。
+                  &lt;br /&gt;
+                  邊緣及格分數為各題 Rating＝3 學員的平均分數；缺少資料時尚無法判定。
+                &lt;/p&gt;
+              &lt;/div&gt;
+              &lt;section className="borderline-explainer" aria-label="邊緣及格分數說明"&gt;
+                &lt;div&gt;
+                  &lt;span className="section-label"&gt;ABOUT BORDERLINE SCORE&lt;/span&gt;
+                  &lt;h2&gt;什麼是邊緣及格分數？&lt;/h2&gt;
+                &lt;/div&gt;
+                &lt;p&gt;每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。&lt;strong className="borderline-standard"&gt;Rating＝3 代表考官依你的整體表現判斷，認為你已達國家考試的及格標準。&lt;/strong&gt; 系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。&lt;/p&gt;
+                &lt;p&gt;&lt;strong&gt;它用來幫助你理解自己的表現與考官判斷的基準。&lt;/strong&gt; 本系統以每題的邊緣及格分數判斷及格；得分等於或高於該分數即為及格。&lt;/p&gt;
+              &lt;/section&gt;
+              &lt;section className="day-section"&gt;
+                &lt;div className="day-heading"&gt;&lt;span&gt;OSCE RESULTS&lt;/span&gt;&lt;h2&gt;已公布的 OSCE 成績&lt;/h2&gt;&lt;/div&gt;
+                &lt;div className="student-score-grid"&gt;
+                    {(record.stations ?? []).map((station) =&gt; {
+                      const g = record.grades.find((g) =&gt; g.key === station.key),
+                        score = g?.score ?? null,
+                        t = record.thresholds.find((t) =&gt; t.key === station.key);
+                      const status = gradeStatus(score, t?.value ?? null);
+                      return (
+                        &lt;article className="student-score-card" key={station.key}&gt;
+                          &lt;div className="score-card-heading"&gt;
+                            &lt;div&gt;&lt;h3&gt;{station.title}&lt;/h3&gt;
+                            {station.testDate &amp;&amp; &lt;p className="score-test-date"&gt;測驗日期 &lt;time dateTime={station.testDate}&gt;{station.testDate}&lt;/time&gt;&lt;/p&gt;}&lt;/div&gt;
+                            &lt;span
+                              className={`result-badge ${status === '及格' ? 'pass' : status === '未達及格' ? 'below' : 'pending'}`}
+                            &gt;
+                              {status}
+                            &lt;/span&gt;
+                          &lt;/div&gt;
+                          &lt;section className="score-question-content" aria-label="考題內容"&gt;
+                            &lt;h4&gt;考題內容&lt;/h4&gt;
+                            &lt;dl className="score-case-details"&gt;
+                              {station.complaint &amp;&amp; &lt;div&gt;&lt;dt&gt;個案主訴&lt;/dt&gt;&lt;dd&gt;{station.complaint}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.diagnosis &amp;&amp; &lt;div&gt;&lt;dt&gt;最終診斷&lt;/dt&gt;&lt;dd&gt;{station.diagnosis}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.prompt &amp;&amp; &lt;div&gt;&lt;dt&gt;命題內容摘要&lt;/dt&gt;&lt;dd&gt;{station.prompt}&lt;/dd&gt;&lt;/div&gt;}
+                            &lt;/dl&gt;
+                          &lt;/section&gt;
+                          &lt;div className="score-performance-grid"&gt;
+                            &lt;section className="score-overview" aria-label="成績摘要"&gt;
+                              &lt;div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}&gt;
+                                {formatScore(score)}
+                                &lt;span&gt; / 100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;div
+                                className="score-track"
+                                aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
+                              &gt;
+                                &lt;div
+                                  className="score-fill"
+                                  style={{ width: `${score ?? 0}%` }}
+                                /&gt;
+                                {t?.value !== null &amp;&amp; t?.value !== undefined &amp;&amp; (
+                                  &lt;i
+                                    className="border-marker"
+                                    style={{ left: `${t.value}%` }}
+                                  /&gt;
+                                )}
+                              &lt;/div&gt;
+                              &lt;div className="track-labels"&gt;
+                                &lt;span&gt;0&lt;/span&gt;
+                                &lt;span&gt;100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;dl className="grade-details"&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;邊緣及格分數&lt;/dt&gt;
+                                  &lt;dd&gt;
+                                    {t?.value === null || t?.value === undefined
+                                      ? '尚無法計算'
+                                      : `${formatScore(t.value)} 分`}
+                                  &lt;/dd&gt;
+                                &lt;/div&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;Global Rating&lt;/dt&gt;
+                                  &lt;dd&gt;{g?.rating ?? '—'} / 5&lt;/dd&gt;
+                                &lt;/div&gt;
+                              &lt;/dl&gt;
+                            &lt;/section&gt;
+                            &lt;DomainRadar title="五大面向表現" scores={g?.domains} maximum={station.domainMax}/&gt;
+                          &lt;/div&gt;
+                          {g?.feedback &amp;&amp; (
+                            &lt;div className="qualitative-feedback"&gt;
+                              &lt;strong&gt;老師回饋&lt;/strong&gt;
+                              &lt;p&gt;{g.feedback}&lt;/p&gt;
+                            &lt;/div&gt;
+                          )}
+                          &lt;p className="score-note"&gt;
+                            {t?.count
+                              ? `邊緣分數採 ${t.count} 位 Rating＝3 學員的該題分數平均。`
+                              : '本題尚無 Rating＝3 且已登錄分數的資料。'}
+                          &lt;/p&gt;
+                        &lt;/article&gt;
+                      );
+                    })}
+                &lt;/div&gt;
+              &lt;/section&gt;
+              &lt;div className="score-legend"&gt;
+                &lt;span&gt;
+                  &lt;i className="legend-border" /&gt;
+                  邊緣及格線
+                &lt;/span&gt;
+              &lt;/div&gt;
+              &lt;p className="portal-note"&gt;
+                成績更新：
+                {record.updatedAt
+                  ? new Intl.DateTimeFormat('zh-TW', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                      timeZone: 'Asia/Taipei',
+                    }).format(new Date(record.updatedAt))
+                  : '—'}
+                。本頁為個人工作坊測驗紀錄，並非國家考試成績。顯示數值最多取至小數點後兩位。
+              &lt;/p&gt;
+            &lt;/&gt;
+          )}
+        &lt;/&gt;
+      )}
+    &lt;/&gt;
+  );
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { DomainRadar } from '@/components/domain-radar';
+import { rpc } from '@/lib/supabase';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+('use client');
+import { useEffect, useState } from 'react';
+import {
+  formatScore,
+  gradeStatus,
+  maskPhone,
+  type StationDefinition,
+  type Grade,
+  type Threshold,
+} from '@/lib/grading';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+type RecordItem = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  workshopName: string;
+  published: number;
+  archived?: boolean;
+  updatedAt: string | null;
+  grades: (Grade &amp; { key: string; feedback?: string | null })[];
+  thresholds: Threshold[];
+  stations?: StationDefinition[];
+  profile?: { nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
+};
+export default function StudentDashboard() {
+  const [records, setRecords] = useState&lt;RecordItem[] | null&gt;(null),
+    [selected, setSelected] = useState(''),
+    [error, setError] = useState(''),
+    [profileBusy, setProfileBusy] = useState(false),
+    [hospitalError, setHospitalError] = useState(''),
+    [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]),
+    [hospitalLoading, setHospitalLoading] = useState(true);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data', {}, abort.signal)
+      .then((data) =&gt; {
+        setRecords(data.records);
+      })
+      .catch((e) =&gt; {
+        if (e.name !== 'AbortError') setError(e.message);
+      });
+    return () =&gt; abort.abort();
+  }, []);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},abort.signal)
+      .then(data=&gt;setHospitals(data.hospitals))
+      .catch(cause=&gt;{if(cause.name!=='AbortError')setHospitalError('官方醫院名冊暫時無法載入，個人資料暫時無法更新。');})
+      .finally(()=&gt;setHospitalLoading(false));
+    return () =&gt; abort.abort();
+  }, []);
+  const record = records?.find((r) =&gt; r.id === selected) ?? records?.[0];
+  async function saveProfile(form: HTMLFormElement) {
+    const fields = new FormData(form);
+    setProfileBusy(true); setError('');
+    try {
+      const hospital = String(fields.get('hospital') ?? '');
+      if (!hospitals.some((item) =&gt; item.name === hospital)) throw new Error('請由政府醫院名冊的搜尋結果選擇服務醫院全名。');
+      await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit') ?? ''), examSpecialty: String(fields.get('examSpecialty') ?? ''), firstOsce: fields.get('firstOsce') === 'yes', birthDate: String(fields.get('birthDate') ?? '') } });
+      const data = await rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data'); setRecords(data.records);
+    } catch (cause) { setError((cause as Error).message); } finally { setProfileBusy(false); }
+  }
+  return (
+    &lt;&gt;
+      &lt;div className="dashboard-title"&gt;
+        &lt;div&gt;
+          &lt;h1&gt;我的 OSCE 成績&lt;/h1&gt;
+          &lt;p&gt;
+            {record
+              ? `${record.name}，回顧每一次練習，整理下一步的方向。`
+              : '回顧每一次練習，整理下一步的方向。'}
+          &lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      {hospitalError &amp;&amp; &lt;p role="alert" className="notice"&gt;{hospitalError}&lt;/p&gt;}
+      {error ? (
+        &lt;section className="notice error" role="alert"&gt;
+          &lt;p&gt;{error}&lt;/p&gt;
+          &lt;Button className="action" onClick={() =&gt; location.reload()}&gt;
+            重新載入
+          &lt;/Button&gt;
+        &lt;/section&gt;
+      ) : !records ? (
+        &lt;p className="empty-panel" role="status"&gt;
+          正在載入你的學習紀錄…
+        &lt;/p&gt;
+      ) : !record ? (
+        &lt;section className="empty-panel"&gt;
+          &lt;span className="section-label"&gt;YOUR RECORDS&lt;/span&gt;
+          &lt;h2&gt;目前尚無工作坊紀錄&lt;/h2&gt;
+          &lt;p&gt;
+            請確認登入 Email
+            與老師建立的名冊一致。若已參加工作坊，請洽課程老師協助確認。
+          &lt;/p&gt;
+        &lt;/section&gt;
+      ) : (
+        &lt;&gt;
+          &lt;div className="workshop-toolbar"&gt;
+            &lt;label&gt;
+              工作坊梯次
+              &lt;NativeSelect
+                value={record.id}
+                onChange={(e) =&gt; setSelected(e.target.value)}
+              &gt;
+                {records.map((r) =&gt; (
+                  &lt;NativeSelectOption key={r.id} value={r.id}&gt;
+                    {r.workshopName}
+                  &lt;/NativeSelectOption&gt;
+                ))}
+              &lt;/NativeSelect&gt;
+            &lt;/label&gt;
+            &lt;span className="identity-pill"&gt;手機電話 {maskPhone(record.phone)}&lt;/span&gt;
+          &lt;/div&gt;
+          {!record.archived &amp;&amp; (!record.profile?.hospital || record.profile.firstOsce === null) ? &lt;section className="data-panel student-profile"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;FIRST LOGIN&lt;/span&gt;&lt;h2&gt;完成個人資料&lt;/h2&gt;&lt;p className="form-help"&gt;姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。服務醫院請由政府名冊搜尋並點選全名。&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;form onSubmit={(event) =&gt; { event.preventDefault(); saveProfile(event.currentTarget); }}&gt;&lt;fieldset disabled={profileBusy || hospitalLoading || !!hospitalError}&gt;&lt;div className="profile-grid"&gt;&lt;label&gt;姓名&lt;Input value={record.name} disabled /&gt;&lt;/label&gt;&lt;label&gt;Email&lt;Input value={record.email ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input value={record.phone ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;護理年資（年）&lt;Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /&gt;&lt;/label&gt;&lt;HospitalPicker defaultValue={record.profile?.hospital ?? ''} hospitals={hospitals} loading={hospitalLoading} /&gt;&lt;label&gt;服務單位&lt;Input name="unit" required maxLength={100} defaultValue={record.profile?.unit ?? ''} /&gt;&lt;/label&gt;&lt;label&gt;報考科別&lt;NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) =&gt; &lt;NativeSelectOption value={item} key={item}&gt;{item}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;是否首次報考國家 OSCE&lt;NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="yes"&gt;是&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="no"&gt;否&lt;/NativeSelectOption&gt;&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;出生年月日&lt;Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /&gt;&lt;/label&gt;&lt;/div&gt;&lt;Button className="action" type="submit"&gt;{profileBusy ? '儲存中…' : '儲存個人資料'}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;&lt;/section&gt; : &lt;section className="profile-summary"&gt;&lt;span&gt;{record.archived ? '已封存梯次，保留當時背景資料' : '個人資料已完成'}&lt;/span&gt;&lt;strong&gt;{record.profile?.examSpecialty ? `${record.profile.examSpecialty}專科護理師` : '背景資料未完整登錄'}&lt;/strong&gt;&lt;p&gt;{record.profile?.hospital || '未登錄醫院'} · {record.profile?.unit || '未登錄單位'} · 護理年資 {record.profile?.nursingYears ?? '未登錄'} 年&lt;/p&gt;&lt;/section&gt;}
+          {!record.published ? (
+            &lt;section className="empty-panel"&gt;
+              &lt;h2&gt;本梯次成績尚未公布&lt;/h2&gt;
+              &lt;p&gt;老師確認成績後，將於此頁開放查詢，請留意課程通知。&lt;/p&gt;
+            &lt;/section&gt;
+          ) : (
+            &lt;&gt;
+              &lt;div className="student-summary"&gt;
+                &lt;div&gt;
+                  &lt;span&gt;評量紀錄&lt;/span&gt;
+                  &lt;strong&gt;
+                    {record.grades.filter((g) =&gt; g.score !== null).length}
+                    &lt;small&gt; / {record.stations?.length ?? 0} 題已登錄&lt;/small&gt;
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;div&gt;
+                  &lt;span&gt;各題及格標準&lt;/span&gt;
+                  &lt;strong&gt;
+                    邊緣及格分數
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;p&gt;
+                  各題得分達該題邊緣及格分數即為及格，未達者以紅字顯示。
+                  &lt;br /&gt;
+                  邊緣及格分數為各題 Rating＝3 學員的平均分數；缺少資料時尚無法判定。
+                &lt;/p&gt;
+              &lt;/div&gt;
+              &lt;section className="borderline-explainer" aria-label="邊緣及格分數說明"&gt;
+                &lt;div&gt;
+                  &lt;span className="section-label"&gt;ABOUT BORDERLINE SCORE&lt;/span&gt;
+                  &lt;h2&gt;什麼是邊緣及格分數？&lt;/h2&gt;
+                &lt;/div&gt;
+                &lt;p&gt;每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。&lt;strong className="borderline-standard"&gt;Rating＝3 代表考官依你的整體表現判斷，認為你已達國家考試的及格標準。&lt;/strong&gt; 系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。&lt;/p&gt;
+                &lt;p&gt;&lt;strong&gt;它用來幫助你理解自己的表現與考官判斷的基準。&lt;/strong&gt; 本系統以每題的邊緣及格分數判斷及格；得分等於或高於該分數即為及格。&lt;/p&gt;
+              &lt;/section&gt;
+              &lt;section className="day-section"&gt;
+                &lt;div className="day-heading"&gt;&lt;span&gt;OSCE RESULTS&lt;/span&gt;&lt;h2&gt;已公布的 OSCE 成績&lt;/h2&gt;&lt;/div&gt;
+                &lt;div className="student-score-grid"&gt;
+                    {(record.stations ?? []).map((station) =&gt; {
+                      const g = record.grades.find((g) =&gt; g.key === station.key),
+                        score = g?.score ?? null,
+                        t = record.thresholds.find((t) =&gt; t.key === station.key);
+                      const status = gradeStatus(score, t?.value ?? null);
+                      return (
+                        &lt;article className="student-score-card" key={station.key}&gt;
+                          &lt;div className="score-card-heading"&gt;
+                            &lt;div&gt;&lt;h3&gt;{station.title}&lt;/h3&gt;
+                            {station.testDate &amp;&amp; &lt;p className="score-test-date"&gt;測驗日期 &lt;time dateTime={station.testDate}&gt;{station.testDate}&lt;/time&gt;&lt;/p&gt;}&lt;/div&gt;
+                            &lt;span
+                              className={`result-badge ${status === '及格' ? 'pass' : status === '未達及格' ? 'below' : 'pending'}`}
+                            &gt;
+                              {status}
+                            &lt;/span&gt;
+                          &lt;/div&gt;
+                          &lt;section className="score-question-content" aria-label="考題內容"&gt;
+                            &lt;h4&gt;考題內容&lt;/h4&gt;
+                            &lt;dl className="score-case-details"&gt;
+                              {station.complaint &amp;&amp; &lt;div&gt;&lt;dt&gt;個案主訴&lt;/dt&gt;&lt;dd&gt;{station.complaint}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.diagnosis &amp;&amp; &lt;div&gt;&lt;dt&gt;最終診斷&lt;/dt&gt;&lt;dd&gt;{station.diagnosis}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.prompt &amp;&amp; &lt;div&gt;&lt;dt&gt;命題內容摘要&lt;/dt&gt;&lt;dd&gt;{station.prompt}&lt;/dd&gt;&lt;/div&gt;}
+                            &lt;/dl&gt;
+                          &lt;/section&gt;
+                          &lt;div className="score-performance-grid"&gt;
+                            &lt;section className="score-overview" aria-label="成績摘要"&gt;
+                              &lt;div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}&gt;
+                                {formatScore(score)}
+                                &lt;span&gt; / 100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;div
+                                className="score-track"
+                                aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
+                              &gt;
+                                &lt;div
+                                  className="score-fill"
+                                  style={{ width: `${score ?? 0}%` }}
+                                /&gt;
+                                {t?.value !== null &amp;&amp; t?.value !== undefined &amp;&amp; (
+                                  &lt;i
+                                    className="border-marker"
+                                    style={{ left: `${t.value}%` }}
+                                  /&gt;
+                                )}
+                              &lt;/div&gt;
+                              &lt;div className="track-labels"&gt;
+                                &lt;span&gt;0&lt;/span&gt;
+                                &lt;span&gt;100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;dl className="grade-details"&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;邊緣及格分數&lt;/dt&gt;
+                                  &lt;dd&gt;
+                                    {t?.value === null || t?.value === undefined
+                                      ? '尚無法計算'
+                                      : `${formatScore(t.value)} 分`}
+                                  &lt;/dd&gt;
+                                &lt;/div&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;Global Rating&lt;/dt&gt;
+                                  &lt;dd&gt;{g?.rating ?? '—'} / 5&lt;/dd&gt;
+                                &lt;/div&gt;
+                              &lt;/dl&gt;
+                            &lt;/section&gt;
+                            &lt;DomainRadar title="五大面向表現" scores={g?.domains} maximum={station.domainMax}/&gt;
+                          &lt;/div&gt;
+                          {g?.feedback &amp;&amp; (
+                            &lt;div className="qualitative-feedback"&gt;
+                              &lt;strong&gt;老師回饋&lt;/strong&gt;
+                              &lt;p&gt;{g.feedback}&lt;/p&gt;
+                            &lt;/div&gt;
+                          )}
+                          &lt;p className="score-note"&gt;
+                            {t?.count
+                              ? `邊緣分數採 ${t.count} 位 Rating＝3 學員的該題分數平均。`
+                              : '本題尚無 Rating＝3 且已登錄分數的資料。'}
+                          &lt;/p&gt;
+                        &lt;/article&gt;
+                      );
+                    })}
+                &lt;/div&gt;
+              &lt;/section&gt;
+              &lt;div className="score-legend"&gt;
+                &lt;span&gt;
+                  &lt;i className="legend-border" /&gt;
+                  邊緣及格線
+                &lt;/span&gt;
+              &lt;/div&gt;
+              &lt;p className="portal-note"&gt;
+                成績更新：
+                {record.updatedAt
+                  ? new Intl.DateTimeFormat('zh-TW', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                      timeZone: 'Asia/Taipei',
+                    }).format(new Date(record.updatedAt))
+                  : '—'}
+                。本頁為個人工作坊測驗紀錄，並非國家考試成績。顯示數值最多取至小數點後兩位。
+              &lt;/p&gt;
+            &lt;/&gt;
+          )}
+        &lt;/&gt;
+      )}
+    &lt;/&gt;
+  );
+}
+</pre></details><h2>components/auth-portal.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { lazy, Suspense, useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { BackendLogin } from '@/components/backend-login';
+import { StudentLogin, StudentActivation, ResetStudentPassword, type Onboarding } from '@/components/student-access';
+import { DEMO_MODE, demoUser } from '@/lib/demo';
+import { rpc, supabase } from '@/lib/supabase';
+import { LoginPanel, PortalShell } from '@/components/portal-shell';
+import { REQUIRED_SCHEMA_VERSION } from '@/lib/schema';
+
+const BackendWorkspace = lazy(()=&gt;import('@/components/backend-workspace').then(module=&gt;({default:module.BackendWorkspace})));
+const BackendApplication = lazy(()=&gt;import('@/components/backend-accounts').then(module=&gt;({default:module.BackendApplication})));
+const StudentDashboard = lazy(()=&gt;import('@/app/student/student-dashboard'));
+
+export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
+  const [session, setSession] = useState&lt;Session | null | undefined&gt;(undefined);
+  const [user, setUser] = useState&lt;{ role: 'teacher' | 'student'; username: string; email: string } | null | undefined&gt;(undefined);
+  const [status, setStatus] = useState&lt;Onboarding | null&gt;(null);
+  const [error, setError] = useState(''), [version, setVersion] = useState(0);
+  const [recovery, setRecovery] = useState(new URLSearchParams(location.search).get('reset') === '1');
+  useEffect(() =&gt; {
+    if (DEMO_MODE) { setUser(demoUser()); return; }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, current) =&gt; {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+      setSession(current);
+    });
+    return () =&gt; subscription.unsubscribe();
+  }, []);
+  const email = session?.user.email, uid = session?.user.id;
+  const sessionReady = session !== undefined;
+  useEffect(() =&gt; {
+    if (DEMO_MODE || !sessionReady) return;
+    if (!email) { setUser(null); setStatus(null); setError(''); return; }
+    let active = true;
+    setUser(undefined); setError('');
+    (async () =&gt; {
+      try {
+        const schema = await rpc&lt;number&gt;('nptc_schema_version');
+        if (schema &lt; REQUIRED_SCHEMA_VERSION) throw new Error('資料庫版本尚未更新，請聯絡系統管理者完成升級。');
+        const isTeacher = await rpc&lt;boolean&gt;('nptc_is_teacher');
+        if (!isTeacher &amp;&amp; !recovery) await rpc('nptc_sync_student_email');
+        const onboarding = !teacher &amp;&amp; !isTeacher &amp;&amp; !recovery ? await rpc&lt;Onboarding&gt;('nptc_student_onboarding_status') : null;
+        if (active) { setStatus(onboarding); setUser({ role: isTeacher ? 'teacher' : 'student', username: email, email }); }
+      } catch (cause) { if (active) setError((cause as Error).message); }
+    })();
+    return () =&gt; { active = false; };
+  }, [email, uid, sessionReady, teacher, version, recovery]);
+  const reload = () =&gt; setVersion(v =&gt; v + 1);
+  return &lt;PortalShell email={user?.username ?? email} teacher={teacher}&gt;
+    &lt;Suspense fallback={&lt;p role="status" className="px-6 py-12 text-center"&gt;正在載入頁面…&lt;/p&gt;}&gt;
+    {error ? &lt;div className="mx-auto max-w-xl space-y-4 px-6 py-12" role="alert"&gt;&lt;p&gt;{error}&lt;/p&gt;&lt;button className="underline" onClick={reload}&gt;重新檢查&lt;/button&gt;&lt;/div&gt;
+    : user === undefined ? &lt;p className="px-6 py-12 text-center"&gt;正在確認登入狀態…&lt;/p&gt;
+    : !user ? &lt;&gt;{recovery &amp;&amp; &lt;p className="p-4 text-center" role="alert"&gt;請開啟最新的重設密碼信件；連結失效時可重新申請。&lt;/p&gt;}{!DEMO_MODE ? (teacher ? &lt;BackendLogin /&gt; : &lt;StudentLogin /&gt;) : &lt;LoginPanel teacher={teacher} /&gt;}&lt;/&gt;
+    : recovery ? &lt;ResetStudentPassword teacher={teacher} onComplete={() =&gt; { setRecovery(false); reload(); }} /&gt;
+    : teacher &amp;&amp; user.role !== 'teacher' ? &lt;BackendApplication email={user.email} /&gt;
+    : teacher ? &lt;BackendWorkspace key={user.email} /&gt;
+    : !DEMO_MODE &amp;&amp; user.role !== 'teacher' &amp;&amp; status?.stage !== 'active' ? &lt;StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} /&gt;
+    : &lt;div className="workspace"&gt;&lt;StudentDashboard canChangeEmail={user.role !== 'teacher'} /&gt;&lt;/div&gt;}
+    &lt;/Suspense&gt;
+  &lt;/PortalShell&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { lazy, Suspense, useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { BackendLogin } from '@/components/backend-login';
+import { StudentLogin, StudentActivation, ResetStudentPassword, type Onboarding } from '@/components/student-access';
+import { DEMO_MODE, demoUser } from '@/lib/demo';
+import { rpc, supabase } from '@/lib/supabase';
+import { LoginPanel, PortalShell } from '@/components/portal-shell';
+import { REQUIRED_SCHEMA_VERSION } from '@/lib/schema';
+
+const BackendWorkspace = lazy(()=&gt;import('@/components/backend-workspace').then(module=&gt;({default:module.BackendWorkspace})));
+const BackendApplication = lazy(()=&gt;import('@/components/backend-accounts').then(module=&gt;({default:module.BackendApplication})));
+const StudentDashboard = lazy(()=&gt;import('@/app/student/student-dashboard'));
+
+export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
+  const [session, setSession] = useState&lt;Session | null | undefined&gt;(undefined);
+  const [user, setUser] = useState&lt;{ role: 'teacher' | 'student'; username: string; email: string } | null | undefined&gt;(undefined);
+  const [status, setStatus] = useState&lt;Onboarding | null&gt;(null);
+  const [error, setError] = useState(''), [version, setVersion] = useState(0);
+  const [recovery, setRecovery] = useState(new URLSearchParams(location.search).get('reset') === '1');
+  useEffect(() =&gt; {
+    if (DEMO_MODE) { setUser(demoUser()); return; }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, current) =&gt; {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+      setSession(current);
+    });
+    return () =&gt; subscription.unsubscribe();
+  }, []);
+  const email = session?.user.email, uid = session?.user.id;
+  const sessionReady = session !== undefined;
+  useEffect(() =&gt; {
+    if (DEMO_MODE || !sessionReady) return;
+    if (!email) { setUser(null); setStatus(null); setError(''); return; }
+    let active = true;
+    setUser(undefined); setError('');
+    (async () =&gt; {
+      try {
+        const schema = await rpc&lt;number&gt;('nptc_schema_version');
+        if (schema &lt; REQUIRED_SCHEMA_VERSION) throw new Error('資料庫版本尚未更新，請聯絡系統管理者完成升級。');
+        const isTeacher = await rpc&lt;boolean&gt;('nptc_is_teacher');
+        if (!isTeacher &amp;&amp; !recovery) await rpc('nptc_sync_student_email');
+        const onboarding = !teacher &amp;&amp; !isTeacher &amp;&amp; !recovery ? await rpc&lt;Onboarding&gt;('nptc_student_onboarding_status') : null;
+        if (active) { setStatus(onboarding); setUser({ role: isTeacher ? 'teacher' : 'student', username: email, email }); }
+      } catch (cause) { if (active) setError((cause as Error).message); }
+    })();
+    return () =&gt; { active = false; };
+  }, [email, uid, sessionReady, teacher, version, recovery]);
+  const reload = () =&gt; setVersion(v =&gt; v + 1);
+  return &lt;PortalShell email={user?.username ?? email} teacher={teacher}&gt;
+    &lt;Suspense fallback={&lt;p role="status" className="px-6 py-12 text-center"&gt;正在載入頁面…&lt;/p&gt;}&gt;
+    {error ? &lt;div className="mx-auto max-w-xl space-y-4 px-6 py-12" role="alert"&gt;&lt;p&gt;{error}&lt;/p&gt;&lt;button className="underline" onClick={reload}&gt;重新檢查&lt;/button&gt;&lt;/div&gt;
+    : user === undefined ? &lt;p className="px-6 py-12 text-center"&gt;正在確認登入狀態…&lt;/p&gt;
+    : !user ? &lt;&gt;{recovery &amp;&amp; &lt;p className="p-4 text-center" role="alert"&gt;請開啟最新的重設密碼信件；連結失效時可重新申請。&lt;/p&gt;}{!DEMO_MODE ? (teacher ? &lt;BackendLogin /&gt; : &lt;StudentLogin /&gt;) : &lt;LoginPanel teacher={teacher} /&gt;}&lt;/&gt;
+    : recovery ? &lt;ResetStudentPassword teacher={teacher} onComplete={() =&gt; { setRecovery(false); reload(); }} /&gt;
+    : teacher &amp;&amp; user.role !== 'teacher' ? &lt;BackendApplication email={user.email} /&gt;
+    : teacher ? &lt;BackendWorkspace key={user.email} /&gt;
+    : !DEMO_MODE &amp;&amp; user.role !== 'teacher' &amp;&amp; status?.stage !== 'active' ? &lt;StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} /&gt;
+    : &lt;div className="workspace"&gt;&lt;StudentDashboard /&gt;&lt;/div&gt;}
+    &lt;/Suspense&gt;
+  &lt;/PortalShell&gt;;
+}
+</pre></details><h2>components/student-email-change.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { DEMO_MODE } from '@/lib/demo';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { appUrl } from '@/lib/routes';
+export function StudentEmailChange({ email }: { email: string }) {
+  const [open,setOpen] = useState(false),[busy,setBusy] = useState(false),[notice,setNotice] = useState(''),[error,setError] = useState('');
+  if (DEMO_MODE) return null;
+  return &lt;section className="data-panel"&gt;&lt;Button type="button" className="action secondary" onClick={()=&gt;setOpen(!open)}&gt;變更登入 Email&lt;/Button&gt;{open &amp;&amp; &lt;form className="entry-form" onSubmit={async event=&gt;{
+    event.preventDefault();setBusy(true);setError('');setNotice('');
+    const next = String(new FormData(event.currentTarget).get('email')).trim().toLowerCase();
+    try {
+      if (next===email.toLowerCase()) throw new Error('請輸入與目前帳號不同的新 Email。');
+      const result = await supabase.auth.updateUser({email:next},{emailRedirectTo:appUrl('/student/')});
+      if (result.error) throw result.error;
+      setNotice('請依新舊信箱收到的信件完成確認，再重新登入。確認完成後會同步所有梯次的名冊，保留成績與歷史紀錄。');
+    } catch(cause) {setError(cause instanceof Error ? cause.message : '變更未完成，請稍後重試。');}
+    finally {setBusy(false);}
+  }}&gt;&lt;p&gt;目前登入 Email：{email}&lt;/p&gt;&lt;label&gt;新 Email&lt;Input name="email" type="email" maxLength={254} required disabled={busy}/&gt;&lt;/label&gt;{error &amp;&amp; &lt;p role="alert"&gt;{error}&lt;/p&gt;}{notice &amp;&amp; &lt;p role="status"&gt;{notice}&lt;/p&gt;}&lt;Button type="submit" disabled={busy}&gt;{busy ? '處理中…' : '寄送 Email 變更確認'}&lt;/Button&gt;&lt;/form&gt;}&lt;/section&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>（此檔案已刪除）</pre></details></html>

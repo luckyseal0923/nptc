@@ -1,7 +1,6 @@
 import { DomainRadar } from '@/components/domain-radar';
 import { rpc } from '@/lib/supabase';
 import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
-import { StudentEmailChange } from '@/components/student-email-change';
 ('use client');
 import { useEffect, useState } from 'react';
 import {
@@ -32,7 +31,7 @@ type RecordItem = {
   stations?: StationDefinition[];
   profile?: { nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
 };
-export default function StudentDashboard({ canChangeEmail = true }: { canChangeEmail?: boolean } = {}) {
+export default function StudentDashboard() {
   const [records, setRecords] = useState<RecordItem[] | null>(null),
     [selected, setSelected] = useState(''),
     [error, setError] = useState(''),
@@ -122,7 +121,6 @@ export default function StudentDashboard({ canChangeEmail = true }: { canChangeE
             <span className="identity-pill">手機電話 {maskPhone(record.phone)}</span>
           </div>
           {!record.archived && (!record.profile?.hospital || record.profile.firstOsce === null) ? <section className="data-panel student-profile"><div className="panel-heading"><div><span className="section-label">FIRST LOGIN</span><h2>完成個人資料</h2><p className="form-help">姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。服務醫院請由政府名冊搜尋並點選全名。</p></div></div><form onSubmit={(event) => { event.preventDefault(); saveProfile(event.currentTarget); }}><fieldset disabled={profileBusy || hospitalLoading || !!hospitalError}><div className="profile-grid"><label>姓名<Input value={record.name} disabled /></label><label>Email<Input value={record.email ?? ''} disabled /></label><label>手機電話<Input value={record.phone ?? ''} disabled /></label><label>護理年資（年）<Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /></label><HospitalPicker defaultValue={record.profile?.hospital ?? ''} hospitals={hospitals} loading={hospitalLoading} /><label>服務單位<Input name="unit" required maxLength={100} defaultValue={record.profile?.unit ?? ''} /></label><label>報考科別<NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}><NativeSelectOption value="">請選擇</NativeSelectOption>{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) => <NativeSelectOption value={item} key={item}>{item}</NativeSelectOption>)}</NativeSelect></label><label>是否首次報考國家 OSCE<NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}><NativeSelectOption value="">請選擇</NativeSelectOption><NativeSelectOption value="yes">是</NativeSelectOption><NativeSelectOption value="no">否</NativeSelectOption></NativeSelect></label><label>出生年月日<Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /></label></div><Button className="action" type="submit">{profileBusy ? '儲存中…' : '儲存個人資料'}</Button></fieldset></form></section> : <section className="profile-summary"><span>{record.archived ? '已封存梯次，保留當時背景資料' : '個人資料已完成'}</span><strong>{record.profile?.examSpecialty ? `${record.profile.examSpecialty}專科護理師` : '背景資料未完整登錄'}</strong><p>{record.profile?.hospital || '未登錄醫院'} · {record.profile?.unit || '未登錄單位'} · 護理年資 {record.profile?.nursingYears ?? '未登錄'} 年</p></section>}
-          {canChangeEmail && <StudentEmailChange email={record.email}/>}
           {!record.published ? (
             <section className="empty-panel">
               <h2>本梯次成績尚未公布</h2>
