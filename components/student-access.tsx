@@ -3,7 +3,7 @@ import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
-import { studentActivationError } from '@/lib/student-access-errors';
+import { studentActivationError, studentAccountExists } from '@/lib/student-access-errors';
 
 type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
 export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
@@ -39,7 +39,11 @@ export function StudentLogin() {
           email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
           password,
         } });
-        if (error) throw new Error(studentActivationError(error));
+        if (error) {
+          const guidance = studentActivationError(error);
+          if (studentAccountExists(error)) { window.alert(guidance); setMode('login'); }
+          throw new Error(guidance);
+        }
         sessionStorage.setItem('nptc-password-created', email.toLowerCase());
         const login = await supabase.auth.signInWithPassword({ email, password });
         if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }

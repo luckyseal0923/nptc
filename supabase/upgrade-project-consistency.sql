@@ -505,6 +505,15 @@ begin
  started_at=case when a.started_at < now()-interval '1 hour' then now() else a.started_at end
  returning attempts into attempt_count;
  if attempt_count>5 then return jsonb_build_object('ok',false); end if;
+ if exists(select 1 from nptc_private.students s
+  where lower(trim(s.email))=normalized_email and trim(s.name)=trim(body->>'name')
+  and s.phone=body->>'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$')
+  and exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false,'code',case when exists(
+   select 1 from nptc_private.student_accounts a join auth.users u on u.id=a.user_id
+   where lower(a.email)=normalized_email and lower(u.email)=normalized_email and a.activated_at is not null
+  ) then 'already_activated' else 'account_exists' end);
+ end if;
  if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
   return jsonb_build_object('ok',false);
  end if;

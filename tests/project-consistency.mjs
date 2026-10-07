@@ -44,6 +44,19 @@ await test('current installation and populated upgrade preserve permissions and 
    await fresh();await call('nptc_set_workshop_archived',{workshopId:archived,archived:true});
    await assert.rejects(()=>call('nptc_set_workshop_archived',{workshopId:current,archived:true}),/已使用/);
   });
+  await t.test('existing-account guidance requires full identity and includes archived history',async()=>{
+   await owner(); await db.exec('truncate nptc_private.activation_attempts');
+   const verify=async body=>(await db.query('select public.nptc_verify_student_roster($1::jsonb) result',[JSON.stringify(body)])).rows[0].result;
+   const identity={name:'測試學員',email:'student@example.test',phone:'0912345678'};
+   await db.exec('set role anon'); await assert.rejects(()=>verify(identity)); await owner(); await db.exec('set role service_role');
+   assert.equal((await verify({...identity,phone:'0900000000'})).code,undefined);
+   assert.equal((await verify(identity)).code,'already_activated');
+   await owner(); await db.query('update nptc_private.students set phone=$1 where id=$2',['0912345679',sid]); await db.exec('set role service_role');
+   assert.equal((await verify(identity)).code,'already_activated');
+   await owner(); await db.query('update nptc_private.students set phone=$1 where id=$2',['0912345678',sid]); await db.query('update nptc_private.student_accounts set activated_at=null where user_id=$1',[student]); await db.exec('set role service_role');
+   assert.equal((await verify(identity)).code,'account_exists');
+   await owner(); await db.query('update nptc_private.student_accounts set activated_at=now() where user_id=$1',[student]); await db.exec('truncate nptc_private.activation_attempts'); await asUser();
+  });
   await t.test('analysis includes archives only for system admins',async()=>{
    assert.equal((await read()).workshops.length,1);
    let a=await read('nptc_analysis_data');assert.equal(a.includesArchived,true);assert.equal(a.workshops.length,2);

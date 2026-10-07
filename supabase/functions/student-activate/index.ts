@@ -28,6 +28,8 @@ Deno.serve(async (request: Request) => {
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { global: { headers: { Authorization: `Bearer ${await serviceAuthorization()}` } }, auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await admin.rpc('nptc_verify_student_roster', { body: { name: body.name.trim(), email: body.email.trim().toLowerCase(), phone: body.phone } });
   if (error) { console.error('Roster RPC failed:', error.code, error.message); return reply(503, '啟用服務暫時無法使用，請聯絡管理員。'); }
+  if (data?.code === 'already_activated') return reply(422, '此資料曾啟用帳號，請直接登入。');
+  if (data?.code === 'account_exists') return reply(410, '此資料已建立帳號，請直接登入接續啟用。');
   if (!data?.ok) return reply(400, '名冊資料不符、嘗試次數過多，或帳號已存在。請確認或聯絡管理員。');
   // 僅建立新帳號；絕不覆寫既有帳號密碼或管理員權限。
   const { error: createError } = await admin.auth.admin.createUser({ email: data.email, password: body.password, email_confirm: true });

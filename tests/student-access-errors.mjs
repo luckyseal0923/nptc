@@ -11,3 +11,6 @@ assert.match(studentActivationError(http(429)),/操作過於頻繁/);
 for(const failure of [new FunctionsFetchError(Error('private')),new FunctionsRelayError(Error('private'))])assert.match(studentActivationError(failure),/無法連線/);
 assert.doesNotMatch(studentActivationError(Error('private credentials')),/private|credentials/);
 console.log('PASS: activation errors distinguish service outages, network failures, safe validation guidance and rate limiting without exposing raw server details');
+
+assert.match(studentActivationError(http(422)),/此資料曾啟用帳號.*直接登入.*忘記密碼/);
+assert.match(studentActivationError(http(410)),/已建立帳號.*接續啟用/);

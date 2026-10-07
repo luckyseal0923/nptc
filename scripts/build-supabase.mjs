@@ -31,8 +31,19 @@ grant execute on function public.nptc_teacher_data(uuid),public.nptc_analysis_da
 const onboarding = extract('upgrade-student-activation','public.nptc_student_onboarding_status').replace(
   'select * into s from nptc_private.students where email=e order by updated_at desc nulls last,id limit 1;',
   'select student.* into s from nptc_private.students student join nptc_private.workshops w on w.id=student.workshop_id where student.email=e order by (w.archived_at is null) desc,student.updated_at desc nulls last,student.id limit 1;');
-const verifyRoster = extract('upgrade-student-roster-activation','public.nptc_verify_student_roster').replace(
+let verifyRoster = extract('upgrade-student-roster-activation','public.nptc_verify_student_roster').replace(
   /from nptc_private\.students s\s+where/, 'from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id\n   where w.archived_at is null and');
+// Existing account guidance requires all roster identifiers, including historical workshops.
+verifyRoster = verifyRoster.replace(" if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then", () => ` if exists(select 1 from nptc_private.students s
+  where lower(trim(s.email))=normalized_email and trim(s.name)=trim(body->>'name')
+  and s.phone=body->>'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$')
+  and exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false,'code',case when exists(
+   select 1 from nptc_private.student_accounts a join auth.users u on u.id=a.user_id
+   where lower(a.email)=normalized_email and lower(u.email)=normalized_email and a.activated_at is not null
+  ) then 'already_activated' else 'account_exists' end);
+ end if;
+ if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then`);
 const studentRead = extract('upgrade-domain-scores','nptc_private.student_data_before_activation').replace(
   "'workshopName',w.name,'published'", "'workshopName',w.name,'archived',w.archived_at is not null,'published'");
 const current = [teacherRead,readWrappers,onboarding,
