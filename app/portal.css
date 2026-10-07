@@ -83,4 +83,5 @@
 .workshop-summary{align-items:stretch}
 .workshop-summary>span{display:flex;align-items:center;gap:3px;height:48px;box-sizing:border-box}
 .workshop-control-card .create-workshop-button{height:48px;min-height:48px!important}
+.workshop-control-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}.workshop-control-actions .action{width:100%;margin:0}
 @media(max-width:680px){.workshop-control-card{align-items:stretch}}

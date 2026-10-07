@@ -1,0 +1,632 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>梯次操作按鈕排版：程式修改對照</title><style>body{max-width:1100px;margin:40px auto;padding:20px;font:16px/1.7 sans-serif}pre{white-space:pre-wrap;padding:20px;background:#f1f5f3;font:13px/1.6 monospace}summary{cursor:pointer;padding:10px;background:#eaf2df}</style><h1>梯次操作按鈕排版</h1><p>封存按鈕移至建立新梯次下方，減少卡片多餘列高。以下提供各檔案完整修改前後內容。</p><h2>app/teacher/teacher-dashboard.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { domainFormValues, domainTotal, validateDomainMax, validateDomainScores } from '@/lib/domains';
+import { DomainMaxFields, DomainGradeFields } from '@/components/domain-score-fields';
+import { RosterSortSelect } from '@/components/roster-sort-select';
+import { sortRoster, type RosterSort } from '@/lib/roster-sort';
+import { StudentEditDialog } from '@/components/student-edit-dialog';
+import { RosterStudentName } from '@/components/roster-student';
+import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
+import { rpc } from '@/lib/supabase';
+import { retryingRequest } from '@/lib/retrying-request';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import Link from '@/components/link';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { formatScore, maskPhone, validateGrade, workshopStations, type Student, type StationDefinition, type Workshop, type Threshold } from '@/lib/grading';
+
+type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
+
+export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops = false }: { onWorkshopChange?: (id: string) =&gt; void; canManageWorkshops?: boolean } = {}) {
+  const loadedWorkshop = useRef&lt;string | undefined&gt;(undefined);
+  const createRequest = useRef(crypto.randomUUID());
+  const [reloadTarget, setReloadTarget] = useState&lt;{ id?: string } | null&gt;(null);
+  const [data, setData] = useState&lt;Data | null&gt;(null);
+  useEffect(() =&gt; { if (data?.selected?.id) onWorkshopChange?.(data.selected.id); }, [data?.selected?.id, onWorkshopChange]);
+  const [rosterSort, setRosterSort] = useState&lt;RosterSort&gt;('original');
+  const sortedRoster = sortRoster(data?.students ?? [], rosterSort);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [loadingNotice, setLoadingNotice] = useState('');
+  const [message, setMessage] = useState('');
+  const [editing, setEditing] = useState&lt;Student | null&gt;(null);
+  const [tab, setTab] = useState('roster');
+  const [showCreate, setShowCreate] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
+  const [scoreStation, setScoreStation] = useState('q1');
+  const [selectedStudentIds, setSelectedStudentIds] = useState&lt;Set&lt;string&gt;&gt;(new Set());
+  const [stationDrafts, setStationDrafts] = useState&lt;StationDefinition[] | null&gt;(null);
+  const stations = workshopStations(data?.selected);
+  const editableStations = stationDrafts ?? stations;
+  const publishedStationKeys = new Set(data?.selected?.publishedStations ?? (data?.selected?.published ? stations.map((station) =&gt; station.key) : []));
+  const selectedStation = stations.find((station) =&gt; station.key === scoreStation) ?? stations[0];
+  const selectedThreshold = data?.thresholds.find((item) =&gt; item.key === selectedStation.key);
+  const rosterLocked = publishedStationKeys.size &gt; 0;
+
+  async function load(id?: string, signal?: AbortSignal) {
+    setLoadingNotice('');
+    const result = await retryingRequest(
+      requestSignal =&gt; rpc&lt;Data&gt;('nptc_teacher_data', { requested_workshop: id || null }, requestSignal),
+      { signal, onRetry: () =&gt; setLoadingNotice('第一次請求逾時，正在重新連線…') },
+    );
+    const nextStations = workshopStations(result.selected);
+    const changed = loadedWorkshop.current !== result.selected?.id;
+    setScoreStation(current =&gt; !changed &amp;&amp; nextStations.some(station =&gt; station.key === current) ? current : nextStations[0].key);
+    setSelectedStudentIds(new Set());
+    if (changed) setShowArchive(false);
+    loadedWorkshop.current = result.selected?.id;
+    setReloadTarget(null);
+    setData(result);
+    setError('');
+    setLoadingNotice('');
+    setEditing(null);
+    setStationDrafts(null);
+    return result;
+  }
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    load(undefined, controller.signal).catch((cause) =&gt; { if (cause.name !== 'AbortError') setError(cause.message); });
+    return () =&gt; controller.abort();
+  }, []);
+  async function changeWorkshop(id: string) {
+    setBusy(true); setError(''); setMessage('');
+    try { await load(id); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
+  }
+  async function reloadAfterSave(id?: string) {
+    try { await load(id); } catch (cause) {
+      setReloadTarget({ id });
+      setError('資料已儲存，但畫面尚未更新：' + (cause as Error).message);
+    }
+  }
+  async function save(payload: Record&lt;string, unknown&gt;, success: string) {
+    if (reloadTarget) { setError('上一筆資料已儲存，請先重新讀取確認結果。'); return false; }
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const body = { ...payload, workshopId: data?.selected?.id,
+        ...(payload.action === 'saveStations' ? { stationsRevision: data?.selected?.stations_revision ?? 0 } : {}),
+        ...(payload.action === 'createWorkshop' ? { requestId: createRequest.current } : {}) };
+      const rpcName = payload.action === 'saveStations' ? 'nptc_teacher_save_stations_v3' : payload.action === 'publishStation' ? 'nptc_teacher_publish_station' : 'nptc_teacher_write';
+      const result = await rpc&lt;{ id?: string }&gt;(rpcName, { body });
+      if (payload.action === 'createWorkshop') createRequest.current = crypto.randomUUID();
+      setMessage(success);
+      await reloadAfterSave(result.id ?? data?.selected?.id);
+      return true;
+    } catch (cause) { setError((cause as Error).message); return false; } finally { setBusy(false); }
+  }
+  async function saveScoreBatch(form: HTMLFormElement) {
+    if (reloadTarget) { setError('上一筆資料已儲存，請先重新讀取確認結果。'); return; }
+    const currentData = data;
+    if (!currentData?.selected) return;
+    if (!selectedStudentIds.size) { setError('請至少勾選一位要儲存的學員。'); return; }
+    const fields = new FormData(form);
+    try {
+      const items = currentData.students.filter((student) =&gt; selectedStudentIds.has(student.id)).map((student) =&gt; ({
+        id: student.id,
+        revision: student.revision,
+        ...(() =&gt; { const domains=domainFormValues(fields,`${student.id}_${selectedStation.key}_domain`); const score=domains ? domainTotal(validateDomainScores(domains,selectedStation.domainMax)) : null; return {...validateGrade(score,fields.get(`${student.id}_rating`)==='' ? null : Number(fields.get(`${student.id}_rating`))),domains}; })(),
+        feedback: String(fields.get(`${student.id}_feedback`) ?? '').trim(),
+      }));
+      setBusy(true); setError(''); setMessage('');
+      await rpc('nptc_teacher_batch_scores_v3', { body: { workshopId: currentData.selected.id, station: selectedStation.key, items } });
+      setSelectedStudentIds(new Set());
+      setMessage(`已儲存 ${items.length} 位學員的${selectedStation.title}成績與回饋。`);
+      await reloadAfterSave(currentData.selected.id);
+    } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
+  }
+  async function deleteStudent(student: Student) {
+    if (!window.confirm(`確定要刪除學員「${student.name}」嗎？此操作無法復原。`)) return;
+    await save({ action: 'deleteStudent', id: student.id, revision: student.revision }, `學員「${student.name}」已刪除。`);
+  }
+  function changeTab(next: string) {
+    setTab(next); setEditing(null); setError(''); setMessage('');
+  }
+
+  if (!data) return &lt;section className="portal-panel"&gt;&lt;p role="status"&gt;{error ? '課程資料載入失敗' : loadingNotice || '正在載入教學評量資料…'}&lt;/p&gt;{error &amp;&amp; &lt;&gt;&lt;p role="alert" className="notice error"&gt;{error}&lt;/p&gt;&lt;Button type="button" disabled={busy} className="action" onClick={() =&gt; changeWorkshop('')}&gt;{busy ? '載入中…' : '重新載入'}&lt;/Button&gt;&lt;/&gt;}&lt;/section&gt;;
+  if (!data.selected) return &lt;section className="empty-panel"&gt;&lt;h2&gt;先建立第一個工作坊梯次&lt;/h2&gt;&lt;p&gt;每個梯次會各自管理名冊、題目、成績與邊緣及格分數。&lt;/p&gt;{message &amp;&amp; &lt;p role="status" className="notice success"&gt;{message}&lt;/p&gt;}{reloadTarget &amp;&amp; &lt;Button disabled={busy} onClick={() =&gt; changeWorkshop(reloadTarget.id ?? '')}&gt;已建立，重新讀取&lt;/Button&gt;}&lt;form className="entry-form" onSubmit={async event =&gt; {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
+    if (!name) { setError('請填寫梯次名稱。'); return; }
+    await save({ action: 'createWorkshop', name }, '新梯次已建立。');
+  }}&gt;&lt;label&gt;梯次名稱&lt;Input name="name" required maxLength={100} placeholder="例如：2026 國考班" /&gt;&lt;/label&gt;{error &amp;&amp; &lt;p role="alert"&gt;{error}&lt;/p&gt;}&lt;Button type="submit" disabled={busy || !!reloadTarget}&gt;{busy ? '建立中…' : '建立第一個梯次'}&lt;/Button&gt;&lt;/form&gt;&lt;/section&gt;;
+
+  return &lt;&gt;
+    &lt;header className="teacher-heading"&gt;
+      &lt;div&gt;&lt;span className="section-label"&gt;TEACHING ASSESSMENT&lt;/span&gt;&lt;h1&gt;教學評量管理&lt;/h1&gt;&lt;p&gt;依序完成名冊、題目、評分與公布。&lt;/p&gt;&lt;/div&gt;
+      &lt;Link href="/student/" className="text-link"&gt;查看學員專區 ↗&lt;/Link&gt;
+    &lt;/header&gt;
+    {error &amp;&amp; &lt;div role="alert" className="notice error"&gt;{error}&lt;/div&gt;}
+    {message &amp;&amp; &lt;div role="status" className="notice success"&gt;{message}&lt;/div&gt;}
+    {reloadTarget &amp;&amp; &lt;Button className="action secondary" disabled={busy} onClick={() =&gt; changeWorkshop(reloadTarget.id ?? '')}&gt;已儲存，重新讀取&lt;/Button&gt;}
+
+    &lt;section className="workshop-control-card"&gt;
+      &lt;div className="workshop-control-copy"&gt;&lt;span className="section-label"&gt;CURRENT WORKSHOP&lt;/span&gt;&lt;h2&gt;{data.selected.name}&lt;/h2&gt;&lt;p&gt;此梯次的名冊、OSCE 題目、成績與公告皆獨立管理。&lt;/p&gt;&lt;/div&gt;
+      &lt;label&gt;切換梯次
+        &lt;NativeSelect aria-label="選擇工作坊梯次" value={data.selected.id} disabled={busy} onChange={(event) =&gt; changeWorkshop(event.target.value)}&gt;
+          {data.workshops.map((workshop) =&gt; &lt;NativeSelectOption key={workshop.id} value={workshop.id}&gt;{workshop.name}&lt;/NativeSelectOption&gt;)}
+        &lt;/NativeSelect&gt;
+      &lt;/label&gt;
+      &lt;div className="workshop-summary"&gt;&lt;span&gt;&lt;b&gt;{data.students.length}&lt;/b&gt; 位學員&lt;/span&gt;&lt;span&gt;&lt;b&gt;{stations.length}&lt;/b&gt; 個 OSCE 題目&lt;/span&gt;&lt;span className={rosterLocked ? 'published' : ''}&gt;{publishedStationKeys.size === 0 ? '成績未公告' : publishedStationKeys.size === stations.length ? '全部題目已公告' : `已公告 ${publishedStationKeys.size} / ${stations.length} 題`}&lt;/span&gt;&lt;/div&gt;
+      &lt;Button className="action create-workshop-button" disabled={busy} onClick={() =&gt; setShowCreate((value) =&gt; !value)}&gt;{showCreate ? '取消新增' : '＋ 建立新梯次'}&lt;/Button&gt;
+      {canManageWorkshops &amp;&amp; &lt;Button className="action secondary" disabled={busy} onClick={() =&gt; setShowArchive(value =&gt; !value)}&gt;{showArchive ? '取消封存' : '封存此梯次'}&lt;/Button&gt;}
+    &lt;/section&gt;
+    {showArchive &amp;&amp; canManageWorkshops &amp;&amp; &lt;section className="create-workshop-card"&gt;&lt;ConfirmWorkshopAction key={data.selected.id} action="archive" workshop={data.selected} onCancel={() =&gt; setShowArchive(false)} onSuccess={async () =&gt; {
+      const name = data.selected!.name;
+      setShowArchive(false);
+      await reloadAfterSave();
+      setMessage(`「${name}」已封存。`);
+    }}/&gt;&lt;/section&gt;}
+    {showCreate &amp;&amp; &lt;form className="create-workshop-card" onSubmit={async (event) =&gt; {
+      event.preventDefault(); const form = event.currentTarget; const name = new FormData(form).get('name');
+      if (await save({ action: 'createWorkshop', name }, '新梯次已建立。')) { form.reset(); setShowCreate(false); }
+    }}&gt;
+      &lt;Input name="name" placeholder="例如：2026 秋季班" maxLength={100} required disabled={busy} /&gt;
+      &lt;Button className="action" type="submit" disabled={busy}&gt;建立梯次&lt;/Button&gt;
+    &lt;/form&gt;}
+
+    &lt;Tabs className="teacher-workflow-tabs" value={tab} onValueChange={(value) =&gt; changeTab(String(value))}&gt;
+      &lt;nav className="workflow-card-grid" aria-label="教學評量流程"&gt;
+        {[['roster','1','建立學員名冊','新增單筆資料或由 Excel 批次匯入'],['stations','2','新增 OSCE 題目','登錄測驗日期、主訴、診斷與命題摘要'],['scores','3','登錄成績與回饋','勾選學員後批次儲存分數'],['publish','4','確認並公布','開放學員查看自己的成績']].map(([value,number,title,description]) =&gt; &lt;button key={value} type="button" disabled={busy} onClick={() =&gt; changeTab(value)} className={tab===value ? 'workflow-card active' : 'workflow-card'}&gt;&lt;span&gt;STEP {number}&lt;/span&gt;&lt;strong&gt;{title}&lt;/strong&gt;&lt;small&gt;{description}&lt;/small&gt;&lt;/button&gt;)}
+      &lt;/nav&gt;
+
+      &lt;TabsContent value="roster"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第一步：建立本梯次名冊&lt;/strong&gt;&lt;span&gt;可逐筆新增，或直接從 Excel 貼上姓名、Email、手機電話。&lt;/span&gt;&lt;/section&gt;
+        {rosterLocked &amp;&amp; &lt;p className="notice"&gt;已有題目公布，名冊已鎖定；請先撤回本梯次所有題目公告再修改，以維持公布成績與及格門檻。&lt;/p&gt;}
+        &lt;div className="roster-entry-grid"&gt;
+        &lt;section className="data-panel import-panel"&gt;
+          &lt;div className="panel-heading"&gt;&lt;div&gt;&lt;h2&gt;批次匯入學員&lt;/h2&gt;&lt;p className="form-help"&gt;欄位順序：姓名、Email、手機電話。第一列欄名可保留。&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;form onSubmit={async (event) =&gt; {
+            event.preventDefault(); const form = event.currentTarget; const source = String(new FormData(form).get('rows') ?? '').trim();
+            const rows = source.split(/\r?\n/).map((line) =&gt; line.split(/\t|,/).map((value) =&gt; value.trim())).filter((row) =&gt; row.some(Boolean));
+            if (rows[0]?.[0]?.match(/姓名|name/i)) rows.shift();
+            if (!rows.length || rows.some((row) =&gt; row.length &lt; 3)) { setError('請貼上每列皆含姓名、Email、手機電話的資料。'); return; }
+            if (await save({ action: 'bulkImportStudents', students: rows.map(([name, email, phone]) =&gt; ({ name, email, phone })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
+          }}&gt;&lt;fieldset disabled={busy || rosterLocked}&gt;&lt;textarea name="rows" placeholder={'姓名\tEmail\t手機電話\n王小明\tstudent@example.com\t0912345678'} /&gt;&lt;Button className="action" type="submit"&gt;批次匯入名冊&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;
+        &lt;/section&gt;
+          &lt;section className="data-panel"&gt;&lt;h2&gt;新增學員&lt;/h2&gt;&lt;p className="form-help"&gt;Email 與手機電話會作為學員登入與聯絡資訊。&lt;/p&gt;
+            &lt;form key='new' className="entry-form" onSubmit={async (event) =&gt; {
+              event.preventDefault(); const form = event.currentTarget; const fields = new FormData(form);
+              if (await save({ action: 'saveStudent', name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone') }, '學員資料已儲存。')) form.reset();
+            }}&gt;&lt;fieldset disabled={busy || rosterLocked}&gt;&lt;label&gt;姓名&lt;Input name="name" required maxLength={100} /&gt;&lt;/label&gt;&lt;label&gt;登入 Email&lt;Input name="email" type="email" required maxLength={254} /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input name="phone" type="tel" required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /&gt;&lt;/label&gt;&lt;div className="form-actions"&gt;&lt;Button className="action" type="submit"&gt;{busy ? '儲存中…' : '儲存學員資料'}&lt;/Button&gt;&lt;/div&gt;&lt;/fieldset&gt;&lt;/form&gt;
+          &lt;/section&gt;
+        &lt;/div&gt;
+        {editing &amp;&amp; &lt;StudentEditDialog key={editing.id} student={editing} busy={busy} error={error} onClose={() =&gt; setEditing(null)} onSave={body =&gt; save(body, '學員資料已儲存。')} /&gt;}
+        &lt;section className="data-panel roster-current"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;CURRENT ROSTER&lt;/span&gt;&lt;h2&gt;目前學員名冊&lt;/h2&gt;&lt;/div&gt;&lt;div className="flex items-center gap-3"&gt;&lt;span&gt;{data.students.length} 位學員&lt;/span&gt;&lt;Button className="action small secondary" disabled={busy} onClick={() =&gt; changeWorkshop(data.selected!.id)}&gt;重新整理&lt;/Button&gt;&lt;/div&gt;&lt;/div&gt;
+          {data.students.length ? &lt;Table&gt;&lt;TableHeader&gt;&lt;TableRow&gt;&lt;TableHead aria-sort={rosterSort === 'stroke-asc' ? 'ascending' : rosterSort === 'stroke-desc' ? 'descending' : 'none'}&gt;&lt;RosterSortSelect value={rosterSort} onChange={setRosterSort} /&gt;&lt;/TableHead&gt;&lt;TableHead&gt;登入資訊&lt;/TableHead&gt;&lt;TableHead&gt;操作&lt;/TableHead&gt;&lt;/TableRow&gt;&lt;/TableHeader&gt;&lt;TableBody&gt;{sortedRoster.map((student) =&gt; &lt;TableRow key={student.id}&gt;&lt;TableCell&gt;&lt;RosterStudentName student={student} /&gt;&lt;/TableCell&gt;&lt;TableCell&gt;{student.email}&lt;small className="cell-email"&gt;手機 {maskPhone(student.phone)}&lt;/small&gt;&lt;/TableCell&gt;&lt;TableCell&gt;&lt;div className="table-actions"&gt;&lt;Button className="action small secondary" disabled={busy || rosterLocked} onClick={() =&gt; { setError(''); setEditing(student); }}&gt;編輯&lt;/Button&gt;&lt;Button className="action small destructive" disabled={busy || rosterLocked} onClick={() =&gt; deleteStudent(student)}&gt;刪除&lt;/Button&gt;&lt;/div&gt;&lt;/TableCell&gt;&lt;/TableRow&gt;)}&lt;/TableBody&gt;&lt;/Table&gt; : &lt;p className="empty-inline"&gt;尚無學員，請先使用上方任一方式新增。&lt;/p&gt;}
+        &lt;/section&gt;
+      &lt;/TabsContent&gt;
+
+      &lt;TabsContent value="stations"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第二步：新增 OSCE 題目&lt;/strong&gt;&lt;span&gt;每一題依序登錄測驗日期、個案主訴、最終診斷與命題內容摘要；題數不限。&lt;/span&gt;&lt;/section&gt;
+        &lt;section className="data-panel"&gt;&lt;form key={`${data.selected.id}:${JSON.stringify(stations)}`} onSubmit={(event) =&gt; {
+          event.preventDefault(); const fields = new FormData(event.currentTarget);
+          try {
+          const configured = editableStations.map((station): StationDefinition =&gt; publishedStationKeys.has(station.key) ? { ...station } : ({ ...station, title: String(fields.get(`${station.key}_title`) ?? '').trim(), testDate: String(fields.get(`${station.key}_testDate`) ?? ''), complaint: String(fields.get(`${station.key}_complaint`) ?? '').trim(), diagnosis: String(fields.get(`${station.key}_diagnosis`) ?? '').trim(), prompt: String(fields.get(`${station.key}_prompt`) ?? '').trim(), ...(() =&gt; { const domainMax=domainFormValues(fields,`${station.key}_max`); if (!domainMax &amp;&amp; stations.some(s=&gt;s.key===station.key &amp;&amp; s.title.trim() &amp;&amp; !s.domainMax)) return {}; return {domainMax:validateDomainMax(domainMax)}; })() }));
+          save({ action: 'saveStations', stations: configured }, 'OSCE 題目設定已儲存。');
+          } catch(cause) { setError((cause as Error).message); }
+        }}&gt;&lt;fieldset disabled={busy}&gt;&lt;div className="station-settings-grid station-settings-all"&gt;{editableStations.map((station, index) =&gt; &lt;article className="station-setting" key={station.key}&gt;&lt;fieldset disabled={publishedStationKeys.has(station.key)}&gt;&lt;span&gt;OSCE 第 {index + 1} 題&lt;/span&gt;&lt;label&gt;題目名稱&lt;Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /&gt;&lt;/label&gt;&lt;label&gt;測驗日期&lt;Input name={`${station.key}_testDate`} type="date" defaultValue={station.testDate} required /&gt;&lt;/label&gt;&lt;label&gt;個案主訴&lt;Input name={`${station.key}_complaint`} defaultValue={station.complaint} required maxLength={300} placeholder="例如：胸痛、呼吸困難" /&gt;&lt;/label&gt;&lt;label&gt;最終診斷&lt;Input name={`${station.key}_diagnosis`} defaultValue={station.diagnosis} required maxLength={300} placeholder="例如：急性心肌梗塞" /&gt;&lt;/label&gt;&lt;label&gt;命題內容摘要&lt;textarea name={`${station.key}_prompt`} defaultValue={station.prompt} required maxLength={2000} placeholder="簡述任務、情境與評分重點" /&gt;&lt;/label&gt;&lt;DomainMaxFields stationKey={station.key} maximum={station.domainMax}/&gt;{publishedStationKeys.has(station.key) &amp;&amp; &lt;p className="form-help"&gt;本題已公告，請先撤回公告再編輯。&lt;/p&gt;}&lt;/fieldset&gt;&lt;/article&gt;)}&lt;/div&gt;&lt;div className="form-actions"&gt;&lt;Button type="button" className="action secondary" onClick={() =&gt; setStationDrafts([...editableStations, { key: `station_${crypto.randomUUID()}`, title: '', testDate: '', complaint: '', diagnosis: '', prompt: '' }])}&gt;＋ 新增題目&lt;/Button&gt;&lt;Button type="submit" className="action"&gt;儲存題目設定&lt;/Button&gt;&lt;/div&gt;&lt;/fieldset&gt;&lt;/form&gt;&lt;/section&gt;
+      &lt;/TabsContent&gt;
+
+      &lt;TabsContent value="scores"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第三步：選擇一站，再登錄該站成績&lt;/strong&gt;&lt;span&gt;每題以邊緣及格分數判定及格，取該題 Global Rating＝3 的平均；無資料時尚無法判定。&lt;/span&gt;&lt;/section&gt;
+        &lt;div className="station-picker"&gt;{stations.map((station) =&gt; {
+          const threshold = data.thresholds.find((item) =&gt; item.key === station.key);
+          return &lt;button type="button" key={station.key} disabled={busy} className={station.key === selectedStation.key ? 'station-card active' : 'station-card'} onClick={() =&gt; { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}&gt;&lt;span&gt;{station.testDate || '尚未設定測驗日期'}&lt;/span&gt;&lt;strong&gt;{station.title}&lt;/strong&gt;&lt;small&gt;邊緣及格：{formatScore(threshold?.value ?? null)} 分&lt;/small&gt;&lt;/button&gt;;
+        })}&lt;/div&gt;
+        &lt;section className="data-panel score-station-panel"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;{selectedStation.testDate || '測驗日期未設定'}&lt;/span&gt;&lt;h2&gt;{selectedStation.title}&lt;/h2&gt;&lt;p className="form-help"&gt;{selectedStation.complaint &amp;&amp; `主訴：${selectedStation.complaint}　`}{selectedStation.diagnosis &amp;&amp; `最終診斷：${selectedStation.diagnosis}`}&lt;br /&gt;{selectedStation.prompt || '尚未填寫命題內容摘要。'}&lt;/p&gt;&lt;/div&gt;&lt;div className="threshold-chip"&gt;Rating＝3 平均&lt;br /&gt;&lt;strong&gt;{formatScore(selectedThreshold?.value ?? null)} 分&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+          {!selectedStation.domainMax &amp;&amp; &lt;p className="notice"&gt;本題尚未設定五面向滿分，請先在「新增 OSCE 題目」完成配分，才能登錄分項成績。&lt;/p&gt;}
+          {data.students.length ? &lt;form noValidate className="score-batch-form score-card-form" key={`${data.selected.id}:${selectedStation.key}:${data.students.map(s=&gt;s.revision).join(',')}`} onSubmit={(event) =&gt; { event.preventDefault(); saveScoreBatch(event.currentTarget); }}&gt;&lt;fieldset disabled={busy || publishedStationKeys.has(selectedStation.key) || !selectedStation.domainMax}&gt;&lt;div className="score-entry-list"&gt;{data.students.map((student) =&gt; &lt;article className={`score-entry-card${selectedStudentIds.has(student.id) ? ' selected' : ''}`} key={student.id}&gt;&lt;div className="score-entry-heading"&gt;&lt;label className="score-entry-select"&gt;&lt;input type="checkbox" aria-label={`選取 ${student.name}`} checked={selectedStudentIds.has(student.id)} onChange={(event) =&gt; setSelectedStudentIds((current) =&gt; { const next = new Set(current); event.target.checked ? next.add(student.id) : next.delete(student.id); return next; })} /&gt;&lt;span&gt;&lt;strong&gt;{student.name}&lt;/strong&gt;&lt;small&gt;手機 {maskPhone(student.phone)}&lt;/small&gt;&lt;/span&gt;&lt;/label&gt;&lt;label className="score-rating"&gt;&lt;span&gt;Global Rating&lt;/span&gt;&lt;NativeSelect name={`${student.id}_rating`} defaultValue={String(student[`${selectedStation.key}_rating`] ?? '')}&gt;&lt;NativeSelectOption value=""&gt;未評分&lt;/NativeSelectOption&gt;{[1, 2, 3, 4, 5].map((number) =&gt; &lt;NativeSelectOption key={number} value={number}&gt;{number}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;&lt;/div&gt;&lt;DomainGradeFields studentId={student.id} studentName={student.name} stationKey={selectedStation.key} scores={student[`${selectedStation.key}_domains`]} maximum={selectedStation.domainMax} legacyScore={student[`${selectedStation.key}_score`]}/&gt;&lt;label className="score-feedback"&gt;&lt;span&gt;質性回饋&lt;/span&gt;&lt;textarea name={`${student.id}_feedback`} maxLength={500} defaultValue={String(student[`${selectedStation.key}_feedback`] ?? '')} placeholder="簡短回饋（最多 500 字）" /&gt;&lt;/label&gt;&lt;/article&gt;)}&lt;/div&gt;&lt;div className="batch-save-bar"&gt;&lt;span&gt;已選取 &lt;strong&gt;{selectedStudentIds.size}&lt;/strong&gt; 位學員；只會儲存勾選的資料。&lt;/span&gt;&lt;Button type="submit" className="action"&gt;批次儲存已勾選成績&lt;/Button&gt;&lt;/div&gt;&lt;/fieldset&gt;&lt;/form&gt; : &lt;p className="empty-inline"&gt;請先在「學員名冊」新增學員。&lt;/p&gt;}
+        &lt;/section&gt;
+      &lt;/TabsContent&gt;
+
+      &lt;TabsContent value="publish"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第四步：逐題確認並公布成績&lt;/strong&gt;&lt;span&gt;每一題可獨立公布或撤回；學員只會看到已公布題目的分數與邊緣及格線。&lt;/span&gt;&lt;/section&gt;
+        &lt;section className="data-panel"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;PUBLISH BY QUESTION&lt;/span&gt;&lt;h2&gt;選擇要公布的 OSCE 題目&lt;/h2&gt;&lt;p className="form-help"&gt;公布後該題成績會鎖定；要修改請先撤回該題公告。&lt;/p&gt;&lt;/div&gt;&lt;span&gt;{publishedStationKeys.size} / {stations.length} 題已公布&lt;/span&gt;&lt;/div&gt;&lt;div className="station-picker"&gt;{stations.map((station) =&gt; { const isPublished = publishedStationKeys.has(station.key); return &lt;article className="station-card" key={station.key}&gt;&lt;span&gt;{station.testDate || '測驗日期未設定'}&lt;/span&gt;&lt;strong&gt;{station.title}&lt;/strong&gt;&lt;small&gt;{isPublished ? '已公布，學員可查詢' : '尚未公布'}&lt;/small&gt;&lt;Button disabled={busy} className={isPublished ? 'action secondary small' : 'action small'} onClick={() =&gt; save({ action: 'publishStation', station: station.key, published: !isPublished }, isPublished ? `已撤回「${station.title}」的公告。` : `已公布「${station.title}」的成績。`)}&gt;{isPublished ? '撤回公告' : '公布本題'}&lt;/Button&gt;&lt;/article&gt;; })}&lt;/div&gt;&lt;/section&gt;
+      &lt;/TabsContent&gt;
+    &lt;/Tabs&gt;
+  &lt;/&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { domainFormValues, domainTotal, validateDomainMax, validateDomainScores } from '@/lib/domains';
+import { DomainMaxFields, DomainGradeFields } from '@/components/domain-score-fields';
+import { RosterSortSelect } from '@/components/roster-sort-select';
+import { sortRoster, type RosterSort } from '@/lib/roster-sort';
+import { StudentEditDialog } from '@/components/student-edit-dialog';
+import { RosterStudentName } from '@/components/roster-student';
+import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
+import { rpc } from '@/lib/supabase';
+import { retryingRequest } from '@/lib/retrying-request';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import Link from '@/components/link';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { formatScore, maskPhone, validateGrade, workshopStations, type Student, type StationDefinition, type Workshop, type Threshold } from '@/lib/grading';
+
+type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
+
+export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops = false }: { onWorkshopChange?: (id: string) =&gt; void; canManageWorkshops?: boolean } = {}) {
+  const loadedWorkshop = useRef&lt;string | undefined&gt;(undefined);
+  const createRequest = useRef(crypto.randomUUID());
+  const [reloadTarget, setReloadTarget] = useState&lt;{ id?: string } | null&gt;(null);
+  const [data, setData] = useState&lt;Data | null&gt;(null);
+  useEffect(() =&gt; { if (data?.selected?.id) onWorkshopChange?.(data.selected.id); }, [data?.selected?.id, onWorkshopChange]);
+  const [rosterSort, setRosterSort] = useState&lt;RosterSort&gt;('original');
+  const sortedRoster = sortRoster(data?.students ?? [], rosterSort);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [loadingNotice, setLoadingNotice] = useState('');
+  const [message, setMessage] = useState('');
+  const [editing, setEditing] = useState&lt;Student | null&gt;(null);
+  const [tab, setTab] = useState('roster');
+  const [showCreate, setShowCreate] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
+  const [scoreStation, setScoreStation] = useState('q1');
+  const [selectedStudentIds, setSelectedStudentIds] = useState&lt;Set&lt;string&gt;&gt;(new Set());
+  const [stationDrafts, setStationDrafts] = useState&lt;StationDefinition[] | null&gt;(null);
+  const stations = workshopStations(data?.selected);
+  const editableStations = stationDrafts ?? stations;
+  const publishedStationKeys = new Set(data?.selected?.publishedStations ?? (data?.selected?.published ? stations.map((station) =&gt; station.key) : []));
+  const selectedStation = stations.find((station) =&gt; station.key === scoreStation) ?? stations[0];
+  const selectedThreshold = data?.thresholds.find((item) =&gt; item.key === selectedStation.key);
+  const rosterLocked = publishedStationKeys.size &gt; 0;
+
+  async function load(id?: string, signal?: AbortSignal) {
+    setLoadingNotice('');
+    const result = await retryingRequest(
+      requestSignal =&gt; rpc&lt;Data&gt;('nptc_teacher_data', { requested_workshop: id || null }, requestSignal),
+      { signal, onRetry: () =&gt; setLoadingNotice('第一次請求逾時，正在重新連線…') },
+    );
+    const nextStations = workshopStations(result.selected);
+    const changed = loadedWorkshop.current !== result.selected?.id;
+    setScoreStation(current =&gt; !changed &amp;&amp; nextStations.some(station =&gt; station.key === current) ? current : nextStations[0].key);
+    setSelectedStudentIds(new Set());
+    if (changed) setShowArchive(false);
+    loadedWorkshop.current = result.selected?.id;
+    setReloadTarget(null);
+    setData(result);
+    setError('');
+    setLoadingNotice('');
+    setEditing(null);
+    setStationDrafts(null);
+    return result;
+  }
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    load(undefined, controller.signal).catch((cause) =&gt; { if (cause.name !== 'AbortError') setError(cause.message); });
+    return () =&gt; controller.abort();
+  }, []);
+  async function changeWorkshop(id: string) {
+    setBusy(true); setError(''); setMessage('');
+    try { await load(id); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
+  }
+  async function reloadAfterSave(id?: string) {
+    try { await load(id); } catch (cause) {
+      setReloadTarget({ id });
+      setError('資料已儲存，但畫面尚未更新：' + (cause as Error).message);
+    }
+  }
+  async function save(payload: Record&lt;string, unknown&gt;, success: string) {
+    if (reloadTarget) { setError('上一筆資料已儲存，請先重新讀取確認結果。'); return false; }
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const body = { ...payload, workshopId: data?.selected?.id,
+        ...(payload.action === 'saveStations' ? { stationsRevision: data?.selected?.stations_revision ?? 0 } : {}),
+        ...(payload.action === 'createWorkshop' ? { requestId: createRequest.current } : {}) };
+      const rpcName = payload.action === 'saveStations' ? 'nptc_teacher_save_stations_v3' : payload.action === 'publishStation' ? 'nptc_teacher_publish_station' : 'nptc_teacher_write';
+      const result = await rpc&lt;{ id?: string }&gt;(rpcName, { body });
+      if (payload.action === 'createWorkshop') createRequest.current = crypto.randomUUID();
+      setMessage(success);
+      await reloadAfterSave(result.id ?? data?.selected?.id);
+      return true;
+    } catch (cause) { setError((cause as Error).message); return false; } finally { setBusy(false); }
+  }
+  async function saveScoreBatch(form: HTMLFormElement) {
+    if (reloadTarget) { setError('上一筆資料已儲存，請先重新讀取確認結果。'); return; }
+    const currentData = data;
+    if (!currentData?.selected) return;
+    if (!selectedStudentIds.size) { setError('請至少勾選一位要儲存的學員。'); return; }
+    const fields = new FormData(form);
+    try {
+      const items = currentData.students.filter((student) =&gt; selectedStudentIds.has(student.id)).map((student) =&gt; ({
+        id: student.id,
+        revision: student.revision,
+        ...(() =&gt; { const domains=domainFormValues(fields,`${student.id}_${selectedStation.key}_domain`); const score=domains ? domainTotal(validateDomainScores(domains,selectedStation.domainMax)) : null; return {...validateGrade(score,fields.get(`${student.id}_rating`)==='' ? null : Number(fields.get(`${student.id}_rating`))),domains}; })(),
+        feedback: String(fields.get(`${student.id}_feedback`) ?? '').trim(),
+      }));
+      setBusy(true); setError(''); setMessage('');
+      await rpc('nptc_teacher_batch_scores_v3', { body: { workshopId: currentData.selected.id, station: selectedStation.key, items } });
+      setSelectedStudentIds(new Set());
+      setMessage(`已儲存 ${items.length} 位學員的${selectedStation.title}成績與回饋。`);
+      await reloadAfterSave(currentData.selected.id);
+    } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
+  }
+  async function deleteStudent(student: Student) {
+    if (!window.confirm(`確定要刪除學員「${student.name}」嗎？此操作無法復原。`)) return;
+    await save({ action: 'deleteStudent', id: student.id, revision: student.revision }, `學員「${student.name}」已刪除。`);
+  }
+  function changeTab(next: string) {
+    setTab(next); setEditing(null); setError(''); setMessage('');
+  }
+
+  if (!data) return &lt;section className="portal-panel"&gt;&lt;p role="status"&gt;{error ? '課程資料載入失敗' : loadingNotice || '正在載入教學評量資料…'}&lt;/p&gt;{error &amp;&amp; &lt;&gt;&lt;p role="alert" className="notice error"&gt;{error}&lt;/p&gt;&lt;Button type="button" disabled={busy} className="action" onClick={() =&gt; changeWorkshop('')}&gt;{busy ? '載入中…' : '重新載入'}&lt;/Button&gt;&lt;/&gt;}&lt;/section&gt;;
+  if (!data.selected) return &lt;section className="empty-panel"&gt;&lt;h2&gt;先建立第一個工作坊梯次&lt;/h2&gt;&lt;p&gt;每個梯次會各自管理名冊、題目、成績與邊緣及格分數。&lt;/p&gt;{message &amp;&amp; &lt;p role="status" className="notice success"&gt;{message}&lt;/p&gt;}{reloadTarget &amp;&amp; &lt;Button disabled={busy} onClick={() =&gt; changeWorkshop(reloadTarget.id ?? '')}&gt;已建立，重新讀取&lt;/Button&gt;}&lt;form className="entry-form" onSubmit={async event =&gt; {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
+    if (!name) { setError('請填寫梯次名稱。'); return; }
+    await save({ action: 'createWorkshop', name }, '新梯次已建立。');
+  }}&gt;&lt;label&gt;梯次名稱&lt;Input name="name" required maxLength={100} placeholder="例如：2026 國考班" /&gt;&lt;/label&gt;{error &amp;&amp; &lt;p role="alert"&gt;{error}&lt;/p&gt;}&lt;Button type="submit" disabled={busy || !!reloadTarget}&gt;{busy ? '建立中…' : '建立第一個梯次'}&lt;/Button&gt;&lt;/form&gt;&lt;/section&gt;;
+
+  return &lt;&gt;
+    &lt;header className="teacher-heading"&gt;
+      &lt;div&gt;&lt;span className="section-label"&gt;TEACHING ASSESSMENT&lt;/span&gt;&lt;h1&gt;教學評量管理&lt;/h1&gt;&lt;p&gt;依序完成名冊、題目、評分與公布。&lt;/p&gt;&lt;/div&gt;
+      &lt;Link href="/student/" className="text-link"&gt;查看學員專區 ↗&lt;/Link&gt;
+    &lt;/header&gt;
+    {error &amp;&amp; &lt;div role="alert" className="notice error"&gt;{error}&lt;/div&gt;}
+    {message &amp;&amp; &lt;div role="status" className="notice success"&gt;{message}&lt;/div&gt;}
+    {reloadTarget &amp;&amp; &lt;Button className="action secondary" disabled={busy} onClick={() =&gt; changeWorkshop(reloadTarget.id ?? '')}&gt;已儲存，重新讀取&lt;/Button&gt;}
+
+    &lt;section className="workshop-control-card"&gt;
+      &lt;div className="workshop-control-copy"&gt;&lt;span className="section-label"&gt;CURRENT WORKSHOP&lt;/span&gt;&lt;h2&gt;{data.selected.name}&lt;/h2&gt;&lt;p&gt;此梯次的名冊、OSCE 題目、成績與公告皆獨立管理。&lt;/p&gt;&lt;/div&gt;
+      &lt;label&gt;切換梯次
+        &lt;NativeSelect aria-label="選擇工作坊梯次" value={data.selected.id} disabled={busy} onChange={(event) =&gt; changeWorkshop(event.target.value)}&gt;
+          {data.workshops.map((workshop) =&gt; &lt;NativeSelectOption key={workshop.id} value={workshop.id}&gt;{workshop.name}&lt;/NativeSelectOption&gt;)}
+        &lt;/NativeSelect&gt;
+      &lt;/label&gt;
+      &lt;div className="workshop-summary"&gt;&lt;span&gt;&lt;b&gt;{data.students.length}&lt;/b&gt; 位學員&lt;/span&gt;&lt;span&gt;&lt;b&gt;{stations.length}&lt;/b&gt; 個 OSCE 題目&lt;/span&gt;&lt;span className={rosterLocked ? 'published' : ''}&gt;{publishedStationKeys.size === 0 ? '成績未公告' : publishedStationKeys.size === stations.length ? '全部題目已公告' : `已公告 ${publishedStationKeys.size} / ${stations.length} 題`}&lt;/span&gt;&lt;/div&gt;
+      &lt;div className="workshop-control-actions"&gt;
+        &lt;Button className="action create-workshop-button" disabled={busy} onClick={() =&gt; setShowCreate((value) =&gt; !value)}&gt;{showCreate ? '取消新增' : '＋ 建立新梯次'}&lt;/Button&gt;
+        {canManageWorkshops &amp;&amp; &lt;Button className="action secondary" disabled={busy} onClick={() =&gt; setShowArchive(value =&gt; !value)}&gt;{showArchive ? '取消封存' : '封存此梯次'}&lt;/Button&gt;}
+      &lt;/div&gt;
+    &lt;/section&gt;
+    {showArchive &amp;&amp; canManageWorkshops &amp;&amp; &lt;section className="create-workshop-card"&gt;&lt;ConfirmWorkshopAction key={data.selected.id} action="archive" workshop={data.selected} onCancel={() =&gt; setShowArchive(false)} onSuccess={async () =&gt; {
+      const name = data.selected!.name;
+      setShowArchive(false);
+      await reloadAfterSave();
+      setMessage(`「${name}」已封存。`);
+    }}/&gt;&lt;/section&gt;}
+    {showCreate &amp;&amp; &lt;form className="create-workshop-card" onSubmit={async (event) =&gt; {
+      event.preventDefault(); const form = event.currentTarget; const name = new FormData(form).get('name');
+      if (await save({ action: 'createWorkshop', name }, '新梯次已建立。')) { form.reset(); setShowCreate(false); }
+    }}&gt;
+      &lt;Input name="name" placeholder="例如：2026 秋季班" maxLength={100} required disabled={busy} /&gt;
+      &lt;Button className="action" type="submit" disabled={busy}&gt;建立梯次&lt;/Button&gt;
+    &lt;/form&gt;}
+
+    &lt;Tabs className="teacher-workflow-tabs" value={tab} onValueChange={(value) =&gt; changeTab(String(value))}&gt;
+      &lt;nav className="workflow-card-grid" aria-label="教學評量流程"&gt;
+        {[['roster','1','建立學員名冊','新增單筆資料或由 Excel 批次匯入'],['stations','2','新增 OSCE 題目','登錄測驗日期、主訴、診斷與命題摘要'],['scores','3','登錄成績與回饋','勾選學員後批次儲存分數'],['publish','4','確認並公布','開放學員查看自己的成績']].map(([value,number,title,description]) =&gt; &lt;button key={value} type="button" disabled={busy} onClick={() =&gt; changeTab(value)} className={tab===value ? 'workflow-card active' : 'workflow-card'}&gt;&lt;span&gt;STEP {number}&lt;/span&gt;&lt;strong&gt;{title}&lt;/strong&gt;&lt;small&gt;{description}&lt;/small&gt;&lt;/button&gt;)}
+      &lt;/nav&gt;
+
+      &lt;TabsContent value="roster"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第一步：建立本梯次名冊&lt;/strong&gt;&lt;span&gt;可逐筆新增，或直接從 Excel 貼上姓名、Email、手機電話。&lt;/span&gt;&lt;/section&gt;
+        {rosterLocked &amp;&amp; &lt;p className="notice"&gt;已有題目公布，名冊已鎖定；請先撤回本梯次所有題目公告再修改，以維持公布成績與及格門檻。&lt;/p&gt;}
+        &lt;div className="roster-entry-grid"&gt;
+        &lt;section className="data-panel import-panel"&gt;
+          &lt;div className="panel-heading"&gt;&lt;div&gt;&lt;h2&gt;批次匯入學員&lt;/h2&gt;&lt;p className="form-help"&gt;欄位順序：姓名、Email、手機電話。第一列欄名可保留。&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;form onSubmit={async (event) =&gt; {
+            event.preventDefault(); const form = event.currentTarget; const source = String(new FormData(form).get('rows') ?? '').trim();
+            const rows = source.split(/\r?\n/).map((line) =&gt; line.split(/\t|,/).map((value) =&gt; value.trim())).filter((row) =&gt; row.some(Boolean));
+            if (rows[0]?.[0]?.match(/姓名|name/i)) rows.shift();
+            if (!rows.length || rows.some((row) =&gt; row.length &lt; 3)) { setError('請貼上每列皆含姓名、Email、手機電話的資料。'); return; }
+            if (await save({ action: 'bulkImportStudents', students: rows.map(([name, email, phone]) =&gt; ({ name, email, phone })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
+          }}&gt;&lt;fieldset disabled={busy || rosterLocked}&gt;&lt;textarea name="rows" placeholder={'姓名\tEmail\t手機電話\n王小明\tstudent@example.com\t0912345678'} /&gt;&lt;Button className="action" type="submit"&gt;批次匯入名冊&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;
+        &lt;/section&gt;
+          &lt;section className="data-panel"&gt;&lt;h2&gt;新增學員&lt;/h2&gt;&lt;p className="form-help"&gt;Email 與手機電話會作為學員登入與聯絡資訊。&lt;/p&gt;
+            &lt;form key='new' className="entry-form" onSubmit={async (event) =&gt; {
+              event.preventDefault(); const form = event.currentTarget; const fields = new FormData(form);
+              if (await save({ action: 'saveStudent', name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone') }, '學員資料已儲存。')) form.reset();
+            }}&gt;&lt;fieldset disabled={busy || rosterLocked}&gt;&lt;label&gt;姓名&lt;Input name="name" required maxLength={100} /&gt;&lt;/label&gt;&lt;label&gt;登入 Email&lt;Input name="email" type="email" required maxLength={254} /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input name="phone" type="tel" required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /&gt;&lt;/label&gt;&lt;div className="form-actions"&gt;&lt;Button className="action" type="submit"&gt;{busy ? '儲存中…' : '儲存學員資料'}&lt;/Button&gt;&lt;/div&gt;&lt;/fieldset&gt;&lt;/form&gt;
+          &lt;/section&gt;
+        &lt;/div&gt;
+        {editing &amp;&amp; &lt;StudentEditDialog key={editing.id} student={editing} busy={busy} error={error} onClose={() =&gt; setEditing(null)} onSave={body =&gt; save(body, '學員資料已儲存。')} /&gt;}
+        &lt;section className="data-panel roster-current"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;CURRENT ROSTER&lt;/span&gt;&lt;h2&gt;目前學員名冊&lt;/h2&gt;&lt;/div&gt;&lt;div className="flex items-center gap-3"&gt;&lt;span&gt;{data.students.length} 位學員&lt;/span&gt;&lt;Button className="action small secondary" disabled={busy} onClick={() =&gt; changeWorkshop(data.selected!.id)}&gt;重新整理&lt;/Button&gt;&lt;/div&gt;&lt;/div&gt;
+          {data.students.length ? &lt;Table&gt;&lt;TableHeader&gt;&lt;TableRow&gt;&lt;TableHead aria-sort={rosterSort === 'stroke-asc' ? 'ascending' : rosterSort === 'stroke-desc' ? 'descending' : 'none'}&gt;&lt;RosterSortSelect value={rosterSort} onChange={setRosterSort} /&gt;&lt;/TableHead&gt;&lt;TableHead&gt;登入資訊&lt;/TableHead&gt;&lt;TableHead&gt;操作&lt;/TableHead&gt;&lt;/TableRow&gt;&lt;/TableHeader&gt;&lt;TableBody&gt;{sortedRoster.map((student) =&gt; &lt;TableRow key={student.id}&gt;&lt;TableCell&gt;&lt;RosterStudentName student={student} /&gt;&lt;/TableCell&gt;&lt;TableCell&gt;{student.email}&lt;small className="cell-email"&gt;手機 {maskPhone(student.phone)}&lt;/small&gt;&lt;/TableCell&gt;&lt;TableCell&gt;&lt;div className="table-actions"&gt;&lt;Button className="action small secondary" disabled={busy || rosterLocked} onClick={() =&gt; { setError(''); setEditing(student); }}&gt;編輯&lt;/Button&gt;&lt;Button className="action small destructive" disabled={busy || rosterLocked} onClick={() =&gt; deleteStudent(student)}&gt;刪除&lt;/Button&gt;&lt;/div&gt;&lt;/TableCell&gt;&lt;/TableRow&gt;)}&lt;/TableBody&gt;&lt;/Table&gt; : &lt;p className="empty-inline"&gt;尚無學員，請先使用上方任一方式新增。&lt;/p&gt;}
+        &lt;/section&gt;
+      &lt;/TabsContent&gt;
+
+      &lt;TabsContent value="stations"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第二步：新增 OSCE 題目&lt;/strong&gt;&lt;span&gt;每一題依序登錄測驗日期、個案主訴、最終診斷與命題內容摘要；題數不限。&lt;/span&gt;&lt;/section&gt;
+        &lt;section className="data-panel"&gt;&lt;form key={`${data.selected.id}:${JSON.stringify(stations)}`} onSubmit={(event) =&gt; {
+          event.preventDefault(); const fields = new FormData(event.currentTarget);
+          try {
+          const configured = editableStations.map((station): StationDefinition =&gt; publishedStationKeys.has(station.key) ? { ...station } : ({ ...station, title: String(fields.get(`${station.key}_title`) ?? '').trim(), testDate: String(fields.get(`${station.key}_testDate`) ?? ''), complaint: String(fields.get(`${station.key}_complaint`) ?? '').trim(), diagnosis: String(fields.get(`${station.key}_diagnosis`) ?? '').trim(), prompt: String(fields.get(`${station.key}_prompt`) ?? '').trim(), ...(() =&gt; { const domainMax=domainFormValues(fields,`${station.key}_max`); if (!domainMax &amp;&amp; stations.some(s=&gt;s.key===station.key &amp;&amp; s.title.trim() &amp;&amp; !s.domainMax)) return {}; return {domainMax:validateDomainMax(domainMax)}; })() }));
+          save({ action: 'saveStations', stations: configured }, 'OSCE 題目設定已儲存。');
+          } catch(cause) { setError((cause as Error).message); }
+        }}&gt;&lt;fieldset disabled={busy}&gt;&lt;div className="station-settings-grid station-settings-all"&gt;{editableStations.map((station, index) =&gt; &lt;article className="station-setting" key={station.key}&gt;&lt;fieldset disabled={publishedStationKeys.has(station.key)}&gt;&lt;span&gt;OSCE 第 {index + 1} 題&lt;/span&gt;&lt;label&gt;題目名稱&lt;Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /&gt;&lt;/label&gt;&lt;label&gt;測驗日期&lt;Input name={`${station.key}_testDate`} type="date" defaultValue={station.testDate} required /&gt;&lt;/label&gt;&lt;label&gt;個案主訴&lt;Input name={`${station.key}_complaint`} defaultValue={station.complaint} required maxLength={300} placeholder="例如：胸痛、呼吸困難" /&gt;&lt;/label&gt;&lt;label&gt;最終診斷&lt;Input name={`${station.key}_diagnosis`} defaultValue={station.diagnosis} required maxLength={300} placeholder="例如：急性心肌梗塞" /&gt;&lt;/label&gt;&lt;label&gt;命題內容摘要&lt;textarea name={`${station.key}_prompt`} defaultValue={station.prompt} required maxLength={2000} placeholder="簡述任務、情境與評分重點" /&gt;&lt;/label&gt;&lt;DomainMaxFields stationKey={station.key} maximum={station.domainMax}/&gt;{publishedStationKeys.has(station.key) &amp;&amp; &lt;p className="form-help"&gt;本題已公告，請先撤回公告再編輯。&lt;/p&gt;}&lt;/fieldset&gt;&lt;/article&gt;)}&lt;/div&gt;&lt;div className="form-actions"&gt;&lt;Button type="button" className="action secondary" onClick={() =&gt; setStationDrafts([...editableStations, { key: `station_${crypto.randomUUID()}`, title: '', testDate: '', complaint: '', diagnosis: '', prompt: '' }])}&gt;＋ 新增題目&lt;/Button&gt;&lt;Button type="submit" className="action"&gt;儲存題目設定&lt;/Button&gt;&lt;/div&gt;&lt;/fieldset&gt;&lt;/form&gt;&lt;/section&gt;
+      &lt;/TabsContent&gt;
+
+      &lt;TabsContent value="scores"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第三步：選擇一站，再登錄該站成績&lt;/strong&gt;&lt;span&gt;每題以邊緣及格分數判定及格，取該題 Global Rating＝3 的平均；無資料時尚無法判定。&lt;/span&gt;&lt;/section&gt;
+        &lt;div className="station-picker"&gt;{stations.map((station) =&gt; {
+          const threshold = data.thresholds.find((item) =&gt; item.key === station.key);
+          return &lt;button type="button" key={station.key} disabled={busy} className={station.key === selectedStation.key ? 'station-card active' : 'station-card'} onClick={() =&gt; { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}&gt;&lt;span&gt;{station.testDate || '尚未設定測驗日期'}&lt;/span&gt;&lt;strong&gt;{station.title}&lt;/strong&gt;&lt;small&gt;邊緣及格：{formatScore(threshold?.value ?? null)} 分&lt;/small&gt;&lt;/button&gt;;
+        })}&lt;/div&gt;
+        &lt;section className="data-panel score-station-panel"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;{selectedStation.testDate || '測驗日期未設定'}&lt;/span&gt;&lt;h2&gt;{selectedStation.title}&lt;/h2&gt;&lt;p className="form-help"&gt;{selectedStation.complaint &amp;&amp; `主訴：${selectedStation.complaint}　`}{selectedStation.diagnosis &amp;&amp; `最終診斷：${selectedStation.diagnosis}`}&lt;br /&gt;{selectedStation.prompt || '尚未填寫命題內容摘要。'}&lt;/p&gt;&lt;/div&gt;&lt;div className="threshold-chip"&gt;Rating＝3 平均&lt;br /&gt;&lt;strong&gt;{formatScore(selectedThreshold?.value ?? null)} 分&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+          {!selectedStation.domainMax &amp;&amp; &lt;p className="notice"&gt;本題尚未設定五面向滿分，請先在「新增 OSCE 題目」完成配分，才能登錄分項成績。&lt;/p&gt;}
+          {data.students.length ? &lt;form noValidate className="score-batch-form score-card-form" key={`${data.selected.id}:${selectedStation.key}:${data.students.map(s=&gt;s.revision).join(',')}`} onSubmit={(event) =&gt; { event.preventDefault(); saveScoreBatch(event.currentTarget); }}&gt;&lt;fieldset disabled={busy || publishedStationKeys.has(selectedStation.key) || !selectedStation.domainMax}&gt;&lt;div className="score-entry-list"&gt;{data.students.map((student) =&gt; &lt;article className={`score-entry-card${selectedStudentIds.has(student.id) ? ' selected' : ''}`} key={student.id}&gt;&lt;div className="score-entry-heading"&gt;&lt;label className="score-entry-select"&gt;&lt;input type="checkbox" aria-label={`選取 ${student.name}`} checked={selectedStudentIds.has(student.id)} onChange={(event) =&gt; setSelectedStudentIds((current) =&gt; { const next = new Set(current); event.target.checked ? next.add(student.id) : next.delete(student.id); return next; })} /&gt;&lt;span&gt;&lt;strong&gt;{student.name}&lt;/strong&gt;&lt;small&gt;手機 {maskPhone(student.phone)}&lt;/small&gt;&lt;/span&gt;&lt;/label&gt;&lt;label className="score-rating"&gt;&lt;span&gt;Global Rating&lt;/span&gt;&lt;NativeSelect name={`${student.id}_rating`} defaultValue={String(student[`${selectedStation.key}_rating`] ?? '')}&gt;&lt;NativeSelectOption value=""&gt;未評分&lt;/NativeSelectOption&gt;{[1, 2, 3, 4, 5].map((number) =&gt; &lt;NativeSelectOption key={number} value={number}&gt;{number}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;&lt;/div&gt;&lt;DomainGradeFields studentId={student.id} studentName={student.name} stationKey={selectedStation.key} scores={student[`${selectedStation.key}_domains`]} maximum={selectedStation.domainMax} legacyScore={student[`${selectedStation.key}_score`]}/&gt;&lt;label className="score-feedback"&gt;&lt;span&gt;質性回饋&lt;/span&gt;&lt;textarea name={`${student.id}_feedback`} maxLength={500} defaultValue={String(student[`${selectedStation.key}_feedback`] ?? '')} placeholder="簡短回饋（最多 500 字）" /&gt;&lt;/label&gt;&lt;/article&gt;)}&lt;/div&gt;&lt;div className="batch-save-bar"&gt;&lt;span&gt;已選取 &lt;strong&gt;{selectedStudentIds.size}&lt;/strong&gt; 位學員；只會儲存勾選的資料。&lt;/span&gt;&lt;Button type="submit" className="action"&gt;批次儲存已勾選成績&lt;/Button&gt;&lt;/div&gt;&lt;/fieldset&gt;&lt;/form&gt; : &lt;p className="empty-inline"&gt;請先在「學員名冊」新增學員。&lt;/p&gt;}
+        &lt;/section&gt;
+      &lt;/TabsContent&gt;
+
+      &lt;TabsContent value="publish"&gt;
+        &lt;section className="workflow-intro"&gt;&lt;strong&gt;第四步：逐題確認並公布成績&lt;/strong&gt;&lt;span&gt;每一題可獨立公布或撤回；學員只會看到已公布題目的分數與邊緣及格線。&lt;/span&gt;&lt;/section&gt;
+        &lt;section className="data-panel"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;PUBLISH BY QUESTION&lt;/span&gt;&lt;h2&gt;選擇要公布的 OSCE 題目&lt;/h2&gt;&lt;p className="form-help"&gt;公布後該題成績會鎖定；要修改請先撤回該題公告。&lt;/p&gt;&lt;/div&gt;&lt;span&gt;{publishedStationKeys.size} / {stations.length} 題已公布&lt;/span&gt;&lt;/div&gt;&lt;div className="station-picker"&gt;{stations.map((station) =&gt; { const isPublished = publishedStationKeys.has(station.key); return &lt;article className="station-card" key={station.key}&gt;&lt;span&gt;{station.testDate || '測驗日期未設定'}&lt;/span&gt;&lt;strong&gt;{station.title}&lt;/strong&gt;&lt;small&gt;{isPublished ? '已公布，學員可查詢' : '尚未公布'}&lt;/small&gt;&lt;Button disabled={busy} className={isPublished ? 'action secondary small' : 'action small'} onClick={() =&gt; save({ action: 'publishStation', station: station.key, published: !isPublished }, isPublished ? `已撤回「${station.title}」的公告。` : `已公布「${station.title}」的成績。`)}&gt;{isPublished ? '撤回公告' : '公布本題'}&lt;/Button&gt;&lt;/article&gt;; })}&lt;/div&gt;&lt;/section&gt;
+      &lt;/TabsContent&gt;
+    &lt;/Tabs&gt;
+  &lt;/&gt;;
+}
+</pre></details><h2>app/portal.css</h2><details><summary>修改前完整檔案</summary><pre>.workspace{max-width:1265px;margin:auto;padding:45px 0 80px}.workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:30px;border-bottom:1px solid var(--border)}.identity-pill{font-size:14px;padding:9px 13px;border:1px solid var(--border);border-radius:7px;overflow-wrap:anywhere}.dashboard-title{display:flex;align-items:center;justify-content:space-between;gap:25px;margin:35px 0}.workspace h1{font-size:36px;line-height:1.45;font-weight:650}.dashboard-title p{margin-top:10px}.text-link{font-size:14px;white-space:nowrap;border-bottom:1px solid var(--border);padding-bottom:6px}.sign-in-layout{display:grid;grid-template-columns:1fr 1fr;gap:75px;align-items:center;padding:70px 0}.sign-in-layout h1{white-space:pre-line;font-size:42px;margin-bottom:25px}.login-facts{display:flex;gap:20px;margin-top:30px;font-size:14px}.login-facts span+span{border-left:1px solid var(--border);padding-left:20px}.workspace .button{font-size:16px}.portal-header{border-bottom:1px solid var(--border)}.workshop-toolbar{display:flex;justify-content:space-between;gap:25px;align-items:end;margin:25px 0}.workshop-toolbar label{font-size:14px;display:grid;gap:9px;min-width:230px}.workspace [data-slot=native-select-wrapper]{width:100%}.workspace [data-slot=native-select],.workspace input{height:44px;font-size:16px;border:1px solid #b7c5bc;background:white;border-radius:6px;padding:9px 12px}.workspace [data-slot=native-select]{padding-right:35px}.new-workshop{display:flex;gap:10px;max-width:500px;flex:1}.workspace .action{min-height:43px;padding:9px 17px;background:var(--primary);color:white;font-size:14px;cursor:pointer;border-radius:6px;border:1px solid var(--primary);height:auto}.workspace .action:hover{background:#2d574e}.workspace .action.secondary{background:white;color:var(--primary);border:1px solid #b7c5bc}.workspace .action.secondary:hover{background:#eef2e8}.workspace .action.destructive{background:white;color:#a13d2d;border:1px solid #e5b4a9}.workspace .action.destructive:hover{background:#fff1ed;border-color:#a13d2d}.table-actions{display:flex;gap:8px}.workspace .action.small{min-height:35px;padding:5px 12px}.workspace button:disabled{opacity:.45;cursor:not-allowed}.management-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:30px 0}.management-stats article{padding:25px;background:white;border:1px solid var(--border);border-radius:10px}.management-stats article&gt;span,.student-summary&gt;div&gt;span{font-size:14px;color:var(--muted);display:block}.management-stats strong,.student-summary strong{display:block;font-size:34px;font-weight:600;margin-top:10px}.management-stats strong small,.student-summary strong small{font-size:14px;font-weight:400;color:var(--muted)}.management-stats strong.status-text{font-size:25px}.threshold-panel{padding:30px;border:1px solid #bdcba9;border-radius:12px;background:#f0f4e9}.workspace h2{font-size:23px}.threshold-panel p{font-size:14px;margin-top:6px}.threshold-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:25px}.threshold-grid&gt;div{border-left:2px solid #b4c68e;padding-left:17px}.threshold-grid span{display:block;font-size:14px}.threshold-grid strong{display:block;font-size:30px;line-height:1.5;font-weight:600}.threshold-grid small{font-size:12px;color:var(--muted)}.publication-bar{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:25px 0}.publication-bar p{font-size:14px}.dashboard-tabs{height:auto!important;padding:5px!important;margin:12px 0 20px}.dashboard-tabs [role=tab]{padding:12px 28px;font-size:16px}.roster-layout{display:grid;grid-template-columns:1.45fr 1fr;gap:20px}.data-panel{padding:28px;background:white;border:1px solid var(--border);border-radius:10px;min-width:0}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}.panel-heading&gt;span{font-size:14px;color:var(--muted)}.data-panel table{font-size:15px}.data-panel th{height:45px;background:#f4f6f1}.data-panel td{padding:15px 10px}.data-panel th,.data-panel td{border-color:var(--border)}.cell-email{display:block;font-size:12px;color:var(--muted);margin-top:5px}.form-help{font-size:14px;margin:10px 0 20px}.entry-form label,.score-input-card label{display:grid;gap:8px;font-size:14px;margin:17px 0}.form-actions{display:flex;gap:10px;margin-top:25px;flex-wrap:wrap}.workspace fieldset{border:0;padding:0;margin:0;min-width:0}.workspace fieldset:disabled input,.workspace fieldset:disabled select{opacity:.6;background:#f5f6f3}.score-editor{margin-top:25px}.score-input-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}.score-input-card{padding:20px;border:1px solid var(--border);border-radius:8px;background:#fafbf8}.score-input-card h3{font-size:17px;font-weight:600}.dim{color:var(--muted)}.notice{padding:17px 20px;margin:20px 0;border:1px solid;border-radius:8px;font-size:15px}.notice.error{color:#8d3526;background:#fff1ed;border-color:#e5b4a9}.notice.success{color:#305232;background:#edf5e8;border-color:#c0d8b2}.empty-panel{padding:55px 35px;border:1px dashed #b7c5bc;border-radius:12px;background:white;margin-top:25px}.empty-panel h2{margin:15px 0}.empty-inline{padding:30px 0;font-size:15px}.student-summary{display:grid;grid-template-columns:1fr 1fr 2fr;gap:25px;padding:28px 32px;background:#eaf0df;border-radius:12px;margin:30px 0 40px;align-items:center}.student-summary p{font-size:14px}.day-section{margin:40px 0}.day-heading{display:flex;align-items:center;gap:18px;margin-bottom:20px}.day-heading&gt;span{font-size:12px;letter-spacing:1px;padding:7px 10px;background:var(--primary);color:#d8ef85;border-radius:4px}.day-heading h2{font-size:24px}.student-score-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}.student-score-card{padding:30px;background:white;border:1px solid var(--border);border-radius:12px}.student-score-card h3{font-size:20px;font-weight:600}.result-badge{font-size:13px;padding:6px 11px;border-radius:30px}.result-badge.pass{background:#e5efdf;color:#375b2e}.result-badge.below{background:#f9e9dc;color:#8b502d}.result-badge.pending{background:#f0f0ed;color:#646b61}.personal-score{font-size:54px;font-weight:600;line-height:1.2;margin:25px 0}.personal-score&gt;span{font-size:16px;color:var(--muted);font-weight:400}.score-track{height:9px;background:#edf0e8;position:relative;margin-top:30px;border-radius:5px}.score-fill{height:100%;background:#50796b;border-radius:5px}.score-track i{position:absolute;top:-5px;width:3px;height:20px}.pass-marker{background:#203d35;transform:translateX(-2px)}.border-marker{background:#ba7935;border:1px solid white;transform:translateX(1px)}.track-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:9px 0 22px}.grade-details{margin:0}.grade-details&gt;div{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #edf0e8;font-size:15px}.grade-details dt{color:var(--muted)}.grade-details dd{margin:0;font-weight:600}.score-note{font-size:12px;margin-top:17px}.score-legend{display:flex;gap:25px;font-size:13px}.score-legend span{display:flex;align-items:center;gap:8px}.score-legend i{display:block;width:3px;height:14px}.legend-fixed{background:#203d35}.legend-border{background:#ba7935}
+@media(max-width:1380px){.workspace{margin:0 6%}}@media(max-width:900px){.sign-in-layout{gap:35px}.roster-layout{grid-template-columns:1fr}.student-summary{grid-template-columns:1fr 1fr}.student-summary p{grid-column:1/-1}.new-workshop{max-width:420px}.threshold-grid{grid-template-columns:repeat(2,1fr)}.workspace h1{font-size:30px}.portal-header{flex-wrap:wrap;height:auto;padding-top:20px;padding-bottom:20px}.portal-header nav{order:3;flex-basis:100%;justify-content:center}.workshop-toolbar{flex-wrap:wrap}.new-workshop{max-width:none}.teacher-commandbar{grid-template-columns:1fr auto}.command-summary{grid-column:1/-1}.station-picker{grid-template-columns:repeat(2,1fr)}}@media(max-width:680px){.workspace{padding-top:25px}.workspace-heading{align-items:flex-start;flex-direction:column;gap:15px}.portal-header nav{display:flex;gap:28px;font-size:14px}.dashboard-title{align-items:flex-start;flex-direction:column;margin:25px 0}.sign-in-layout{grid-template-columns:1fr;padding:35px 0;gap:30px}.sign-in-layout h1{font-size:32px}.workspace .portal-panel{padding:25px}.workspace .button{padding:14px 18px}.new-workshop{flex-basis:100%;flex-wrap:wrap}.new-workshop input{flex:1;min-width:180px}.workshop-toolbar&gt;label{width:100%}.management-stats{gap:10px;grid-template-columns:1fr 1fr}.management-stats article{padding:18px}.management-stats article:last-child{grid-column:1/-1}.management-stats strong{font-size:28px}.management-stats strong.status-text{font-size:21px}.threshold-panel{padding:22px}.threshold-grid{gap:23px 10px}.threshold-grid&gt;div{padding-left:12px}.threshold-grid strong{font-size:26px}.publication-bar{flex-direction:column;align-items:flex-start}.data-panel{padding:20px}.score-input-grid{grid-template-columns:1fr}.student-score-grid{grid-template-columns:1fr}.student-score-card{padding:25px}.student-summary{padding:23px;gap:20px}.student-summary strong{font-size:30px}.student-summary strong small{display:block;margin-top:4px}.empty-panel{padding:30px 22px}.score-legend{gap:18px;flex-wrap:wrap}.login-facts{gap:12px;font-size:13px}.login-facts span+span{padding-left:12px}.teacher-heading,.teacher-commandbar,.publish-panel{align-items:flex-start;flex-direction:column;display:flex}.teacher-commandbar{gap:12px}.teacher-commandbar label{width:100%}.create-workshop-card,.single-score-form{display:grid;grid-template-columns:1fr}.teacher-tabs{overflow-x:auto}.teacher-tabs [role=tab]{font-size:14px}.workflow-intro{align-items:flex-start;flex-direction:column;gap:5px}.station-settings-grid,.station-picker{grid-template-columns:1fr}.panel-heading{align-items:flex-start;flex-direction:column}.threshold-chip{text-align:left}}
+
+.teacher-heading{display:flex;justify-content:space-between;align-items:end;gap:24px;margin:32px 0 20px}.teacher-heading h1{font-size:30px;margin-top:7px}.teacher-heading p{margin-top:7px;font-size:15px}.section-label{font-size:11px;font-weight:700;letter-spacing:.16em;color:#48766d}.teacher-commandbar{display:grid;grid-template-columns:minmax(220px,1fr) 1fr auto;align-items:end;gap:18px;padding:18px 20px;background:white;border:1px solid var(--border);border-radius:10px}.teacher-commandbar label{display:grid;gap:7px;font-size:13px;font-weight:600}.command-summary{display:flex;gap:12px;align-items:center;font-size:14px;color:var(--muted)}.command-summary span{padding:7px 10px;border-radius:5px;background:#f3f5f0}.command-summary .published,.status-badge.published{background:#e5efdf;color:#365a2e}.create-workshop-card{display:flex;gap:10px;align-items:center;padding:15px 20px;background:#f1f5ed;border:1px solid #d6e0ce;border-radius:9px;margin-top:10px}.create-workshop-card input{max-width:430px;flex:1}.teacher-tabs{width:100%!important;justify-content:flex-start!important;background:transparent!important;border-bottom:1px solid var(--border);border-radius:0!important;padding:0!important;margin:27px 0 20px!important}.teacher-tabs [role=tab]{flex:0 0 auto;padding:11px 18px!important;border-radius:7px 7px 0 0}.teacher-tabs [role=tab][data-active]{background:#eaf0df!important;color:var(--primary)!important}.workflow-intro{display:flex;gap:16px;align-items:baseline;padding:0 0 15px;color:var(--muted);font-size:14px}.workflow-intro strong{color:var(--primary);font-size:16px}.import-panel{margin-bottom:20px}.import-panel textarea,.station-setting textarea{display:block;width:100%;min-height:100px;border:1px solid #b7c5bc;border-radius:6px;padding:11px;font:inherit;resize:vertical;background:white;margin:0 0 12px}.station-settings-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px}.station-setting{border:1px solid var(--border);border-radius:9px;padding:20px;background:#fafbf8}.station-setting&gt;span{font-size:12px;color:#3e7168;font-weight:700}.station-setting label{display:grid;gap:7px;font-size:14px;margin-top:14px}.station-setting textarea{min-height:120px;margin:0}.station-picker{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}.station-card{min-height:134px;text-align:left;padding:17px;border:1px solid var(--border);border-radius:9px;background:white;color:var(--primary);cursor:pointer;display:flex;flex-direction:column;gap:8px}.station-card:hover{border-color:#7d9e90}.station-card.active{border:2px solid var(--primary);background:#eef4e8;padding:16px}.station-card span{font-size:12px;color:var(--muted)}.station-card strong{font-size:16px;line-height:1.35}.station-card small{font-size:12px;color:#536e67;margin-top:auto}.score-station-panel{margin-top:0}.threshold-chip{text-align:right;font-size:12px;color:var(--muted);white-space:nowrap}.threshold-chip strong{font-size:23px;color:var(--primary)}.single-score-form{display:grid;grid-template-columns:1fr 1fr auto;gap:15px;align-items:end}.single-score-form label{display:grid;gap:8px;font-size:14px}.publish-panel{display:flex;align-items:center;justify-content:space-between;gap:30px;min-height:170px}.publish-panel h2{margin:15px 0 8px}.publish-panel p{font-size:14px;color:var(--muted)}.status-badge{display:inline-block;padding:6px 10px;border-radius:99px;background:#f0f0ed;color:#5d675f;font-size:13px}
+.teacher-workflow-tabs{display:block!important;width:100%;min-width:0}.teacher-workflow-tabs [data-slot=tabs-content]{display:block!important;width:100%;min-width:0}.teacher-workflow-tabs [data-slot=tabs-list]{max-width:100%}
+.score-batch-form table{table-layout:fixed;min-width:980px}.score-batch-form th:nth-child(1){width:62px}.score-batch-form th:nth-child(2){width:18%}.score-batch-form th:nth-child(3){width:14%}.score-batch-form th:nth-child(4){width:16%}.score-batch-form td{vertical-align:top}.score-batch-form input[type=number],.score-batch-form [data-slot=native-select]{width:100%;min-width:88px;height:38px;font-size:14px}.score-batch-form textarea{width:100%;min-height:62px;border:1px solid #b7c5bc;border-radius:6px;padding:8px;font:inherit;font-size:13px;resize:vertical}.score-batch-form input[type=checkbox]{width:17px;height:17px;accent-color:var(--primary);margin-top:9px}.batch-save-bar{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-top:18px;padding:14px 0 0;border-top:1px solid var(--border);font-size:14px;color:var(--muted)}.batch-save-bar strong{color:var(--primary)}.qualitative-feedback{margin-top:18px;padding:14px 15px;border-left:3px solid #7d9e90;background:#f4f7f1;font-size:14px}.qualitative-feedback strong{color:var(--primary)}.qualitative-feedback p{margin:7px 0 0;white-space:pre-wrap;line-height:1.65}
+@media(max-width:900px){.teacher-commandbar{grid-template-columns:1fr auto}.command-summary{grid-column:1/-1}.station-picker{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:680px){.teacher-heading,.teacher-commandbar,.publish-panel{align-items:flex-start;flex-direction:column;display:flex}.teacher-commandbar{gap:12px}.teacher-commandbar label{width:100%}.create-workshop-card,.single-score-form{display:grid;grid-template-columns:1fr}.teacher-tabs{overflow-x:auto}.teacher-tabs [role=tab]{font-size:14px}.workflow-intro{align-items:flex-start;flex-direction:column;gap:5px}.station-settings-grid,.station-picker{grid-template-columns:1fr}.panel-heading{align-items:flex-start;flex-direction:column}.threshold-chip{text-align:left}}
+.workshop-control-card{display:grid;grid-template-columns:minmax(280px,1.3fr) minmax(230px,.8fr) auto;gap:24px;align-items:end;padding:28px 30px;background:linear-gradient(120deg,#eaf2e3,#f8faf6);border:1px solid #c8d8bd;border-radius:14px}.workshop-control-copy h2{font-size:25px;margin:8px 0}.workshop-control-copy p{font-size:14px;color:var(--muted)}.workshop-control-card&gt;label{display:grid;gap:8px;font-size:14px;font-weight:650}.workshop-control-card .command-summary{align-self:center;flex-wrap:wrap}.create-workshop-button{min-height:52px!important;font-size:16px!important;white-space:nowrap}.workflow-card-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:28px 0 22px}.workflow-card{min-height:142px;padding:20px;text-align:left;border:1px solid var(--border);border-radius:12px;background:white;color:var(--primary);cursor:pointer;display:flex;flex-direction:column;gap:9px;transition:.15s ease}.workflow-card:hover{border-color:#6d9485;transform:translateY(-1px)}.workflow-card.active{background:#eaf2e3;border:2px solid var(--primary);padding:19px}.workflow-card span{font-size:11px;letter-spacing:.12em;color:#5d8177;font-weight:700}.workflow-card strong{font-size:19px;line-height:1.35}.workflow-card small{font-size:13px;line-height:1.5;color:var(--muted);margin-top:auto}@media(max-width:900px){.workshop-control-card{grid-template-columns:1fr 1fr}.workshop-control-copy{grid-column:1/-1}.workflow-card-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:680px){.workshop-control-card{display:flex;flex-direction:column;align-items:stretch;padding:22px}.workshop-control-card .command-summary{align-self:stretch}.workflow-card-grid{grid-template-columns:1fr}.workflow-card{min-height:116px}}
+.workshop-control-card{grid-template-columns:minmax(260px,1.35fr) minmax(190px,.7fr) minmax(260px,1fr) auto;align-items:center}.workshop-summary{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}.workshop-summary span{padding:8px 10px;background:white;border:1px solid #dce4d8;border-radius:6px;white-space:nowrap}.workshop-summary b{color:var(--primary);font-size:16px}.workshop-summary .published{background:#e1f0d7;color:#315a2e;border-color:#c4dcb6}.roster-entry-grid{display:grid;grid-template-columns:1.25fr .9fr;gap:20px;align-items:stretch}.roster-entry-grid .data-panel{margin:0}.roster-current{margin-top:20px}.roster-current .panel-heading h2{margin-top:5px}@media(max-width:1100px){.workshop-control-card{grid-template-columns:1fr 1fr}.workshop-control-copy{grid-column:1/-1}.create-workshop-button{justify-self:start}.roster-entry-grid{grid-template-columns:1fr}}@media(max-width:680px){.workspace{margin-left:5%;margin-right:5%;padding-left:0;padding-right:0}.workshop-summary{width:100%}.create-workshop-button{width:100%}}
+.roster-sort-button{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;color:#34594e;font:inherit;font-weight:650;padding:7px 9px;margin:-7px -9px;border-radius:6px;cursor:pointer}.roster-sort-button:hover{background:#e7eee5;color:#173f39}.roster-sort-button.active{color:#176b5d;background:#e3eee7}.roster-sort-button:focus-visible{outline:2px solid #398274;outline-offset:2px}
+.station-days{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:24px}.station-day{padding:20px;border:1px solid var(--border);border-radius:10px;background:#fafbf8}.station-day&gt;header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:17px}.station-day&gt;header h2{font-size:21px;margin-top:5px}.station-day&gt;header&gt;span{padding:6px 9px;border-radius:99px;background:#e6eee0;color:#416457;font-size:12px}.station-day .station-settings-grid{grid-template-columns:1fr;margin:0}.add-station-card{min-height:190px;width:100%;text-align:left;padding:20px;border:1px dashed #9eb8a9;border-radius:9px;background:white;color:var(--primary);display:flex;flex-direction:column;gap:12px;cursor:pointer}.add-station-card:hover{background:#f0f6eb;border-color:var(--primary)}.add-station-card span{font-size:12px;color:var(--muted)}.add-station-card strong{font-size:18px}.add-station-card small{font-size:13px;color:var(--muted)}@media(max-width:900px){.station-days{grid-template-columns:1fr}}
+.profile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.profile-grid&gt;label{display:grid;gap:7px;font-size:14px}.hospital-picker{position:relative;display:grid;gap:7px;font-size:14px}.hospital-options{position:absolute;z-index:5;top:72px;left:0;right:0;max-height:240px;overflow:auto;padding:6px;background:white;border:1px solid #b7c5bc;border-radius:7px;box-shadow:0 8px 22px rgba(20,56,50,.14)}.hospital-options button{display:block;width:100%;padding:9px 10px;text-align:left;background:white;border:0;color:var(--primary);cursor:pointer}.hospital-options button:hover{background:#eef4e8}.hospital-options p{padding:8px;margin:0;font-size:13px}.hospital-picker small{font-size:12px;color:#477168}.profile-summary{margin:22px 0;padding:18px 20px;border:1px solid #c9dbbd;border-radius:10px;background:#f1f7ed}.profile-summary span{font-size:12px;color:#477168}.profile-summary strong{display:block;margin:5px 0;font-size:19px}.profile-summary p{font-size:14px}@media(max-width:900px){.profile-grid{grid-template-columns:1fr 1fr}}@media(max-width:680px){.profile-grid{grid-template-columns:1fr}}
+.borderline-explainer{display:grid;grid-template-columns:minmax(220px,.7fr) 1fr 1fr;gap:24px;padding:24px 28px;background:#fffaf0;border:1px solid #e5d2aa;border-radius:12px;margin:-18px 0 40px}.borderline-explainer h2{font-size:21px;margin-top:7px}.borderline-explainer p{font-size:14px;line-height:1.75;margin:0;color:#53615b}.borderline-explainer strong{color:#294b43}@media(max-width:900px){.borderline-explainer{grid-template-columns:1fr;margin-top:0}}
+.borderline-explainer .borderline-standard{color:#b42318;font-weight:700}
+
+/* Published OSCE cards: give narrative content its own rows. */
+.score-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:22px}
+.score-card-heading&gt;div{min-width:0;flex:1}
+.student-score-card .score-card-heading h3{font-size:22px;line-height:1.5;font-weight:700;overflow-wrap:anywhere}
+.score-card-heading .result-badge{flex-shrink:0;white-space:nowrap;margin-top:4px}
+.score-test-date{font-size:13px;line-height:1.6;color:#60736c;margin-top:8px;letter-spacing:0}
+.score-test-date time{margin-left:8px;white-space:nowrap}
+.score-case-details{display:grid;gap:16px;margin:0;padding:20px;background:#f5f7f2;border-radius:8px}
+.score-question-content{margin:14px 0 18px}.score-question-content h4{font-size:14px;font-weight:700;color:#365e57;margin:0 0 8px}.score-question-content .score-case-details{margin-top:0;grid-template-columns:1fr 1fr;gap:10px 18px;padding:14px 16px}.score-question-content .score-case-details&gt;div:last-child{grid-column:1/-1}.score-performance-grid{display:grid;grid-template-columns:minmax(210px,.8fr) minmax(300px,1.2fr);gap:20px;align-items:center}.score-performance-grid .personal-score{margin:0 0 14px}.score-performance-grid .score-track{margin-top:16px}.score-performance-grid .track-labels{margin-bottom:10px}.score-performance-grid .domain-radar{margin:0;padding:12px}.score-performance-grid .domain-radar figcaption{font-size:14px}.score-performance-grid .domain-radar svg{max-width:400px}
+.score-case-details:empty{display:none}
+.score-case-details dt{display:inline-block;padding:2px 7px;border-radius:4px;background:#e5eee7;font-size:13px;font-weight:750;color:#174943;margin-bottom:6px;letter-spacing:.03em}
+.score-case-details dd{margin:0;font-size:15px;line-height:1.85;color:#244b43;white-space:pre-wrap;overflow-wrap:anywhere}
+.student-score-card .qualitative-feedback{margin-top:22px;padding:18px 20px}
+.student-score-card .qualitative-feedback strong{display:block;font-size:14px;margin-bottom:8px}
+.student-score-card .qualitative-feedback p{font-size:15px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}
+.student-score-card .score-note{line-height:1.75;color:#65756f}
+@media(max-width:900px){.student-score-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.student-score-card{padding:20px}.student-score-card .score-card-heading h3{font-size:20px}.score-card-heading{gap:10px}.score-case-details{padding:16px}}
+@media(max-width:600px){.score-question-content .score-case-details,.score-performance-grid{grid-template-columns:1fr}.score-question-content .score-case-details&gt;div:last-child{grid-column:auto}.score-performance-grid{gap:16px}.score-performance-grid .domain-radar svg{max-width:340px}}
+.student-score-card .personal-score.score-failed{color:#b42318}
+.student-score-card .result-badge.below{background:#fff0ee;color:#b42318}
+
+/* Visual refinement: preserve controls and workflow, reduce decorative height. */
+.workspace{padding-top:28px}
+.teacher-heading{margin-bottom:20px}
+.workspace h1{font-size:30px;line-height:1.35}
+.workshop-control-card{padding:20px 24px;gap:18px}
+.workshop-control-copy h2{font-size:23px}
+.workflow-card-grid{margin:20px 0 18px;gap:12px}
+.workflow-card{min-height:110px;padding:16px;gap:7px}
+.workflow-card.active{padding:15px}
+.workflow-card strong{font-size:17px}
+.workflow-card small{line-height:1.5}
+.data-panel th,.data-panel td,.data-panel tr{border-color:#dce5df}
+.data-panel td{padding:12px 10px;vertical-align:top}
+.data-panel th{font-weight:650;color:#34594e}
+.score-batch-form textarea{min-height:56px;line-height:1.6}
+.account-card h3{font-size:19px;font-weight:700;line-height:1.5;overflow-wrap:anywhere}
+.account-card p{line-height:1.7;margin-top:8px;color:#536b63}
+.account-card .account-status{display:inline-block;padding:4px 10px;border-radius:20px;font-size:13px;font-weight:650;margin:14px 0;background:#f2f4f1}
+.account-card .account-status.active{background:#e8f2e3;color:#315c35}
+.account-card .account-status.pending{background:#fff5df;color:#785615}
+.account-card .account-status.disabled{background:#fff0ee;color:#a13d2d}
+.account-card .action{display:flex;margin-top:8px}
+.student-score-card .personal-score{margin-top:12px}
+.student-score-card .score-case-details{margin-top:22px}
+.student-summary&gt;div:nth-child(2) strong{font-size:24px;line-height:1.5}
+@media(max-width:680px){
+ .workspace{padding-top:24px}
+ .workspace h1{font-size:26px}
+ .workshop-control-card{padding:18px;gap:14px}
+ .workflow-card-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .workflow-card{min-height:112px;padding:12px}
+ .workflow-card.active{padding:11px}
+ .workflow-card strong{font-size:15px}
+ .workflow-card small{font-size:12px}
+ .data-panel{padding:18px}
+ .day-heading{align-items:flex-start;flex-direction:column;gap:10px}
+ .student-summary&gt;div:nth-child(2) strong{font-size:21px}
+ .borderline-explainer{padding:20px;gap:14px;margin-bottom:24px}
+ .score-batch-form::before{content:"表格可左右滑動，查看分數、評等與回饋";display:block;font-size:13px;color:#536b63;margin-bottom:12px}
+}
+
+/* Keep the workshop selector, metrics and action on the same baseline. */
+.workshop-control-card{align-items:end}
+.workshop-control-card [data-slot=native-select]{height:48px}
+.workshop-summary{align-items:stretch}
+.workshop-summary&gt;span{display:flex;align-items:center;gap:3px;height:48px;box-sizing:border-box}
+.workshop-control-card .create-workshop-button{height:48px;min-height:48px!important}
+@media(max-width:680px){.workshop-control-card{align-items:stretch}}
+</pre></details><details><summary>修改後完整檔案</summary><pre>.workspace{max-width:1265px;margin:auto;padding:45px 0 80px}.workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:30px;border-bottom:1px solid var(--border)}.identity-pill{font-size:14px;padding:9px 13px;border:1px solid var(--border);border-radius:7px;overflow-wrap:anywhere}.dashboard-title{display:flex;align-items:center;justify-content:space-between;gap:25px;margin:35px 0}.workspace h1{font-size:36px;line-height:1.45;font-weight:650}.dashboard-title p{margin-top:10px}.text-link{font-size:14px;white-space:nowrap;border-bottom:1px solid var(--border);padding-bottom:6px}.sign-in-layout{display:grid;grid-template-columns:1fr 1fr;gap:75px;align-items:center;padding:70px 0}.sign-in-layout h1{white-space:pre-line;font-size:42px;margin-bottom:25px}.login-facts{display:flex;gap:20px;margin-top:30px;font-size:14px}.login-facts span+span{border-left:1px solid var(--border);padding-left:20px}.workspace .button{font-size:16px}.portal-header{border-bottom:1px solid var(--border)}.workshop-toolbar{display:flex;justify-content:space-between;gap:25px;align-items:end;margin:25px 0}.workshop-toolbar label{font-size:14px;display:grid;gap:9px;min-width:230px}.workspace [data-slot=native-select-wrapper]{width:100%}.workspace [data-slot=native-select],.workspace input{height:44px;font-size:16px;border:1px solid #b7c5bc;background:white;border-radius:6px;padding:9px 12px}.workspace [data-slot=native-select]{padding-right:35px}.new-workshop{display:flex;gap:10px;max-width:500px;flex:1}.workspace .action{min-height:43px;padding:9px 17px;background:var(--primary);color:white;font-size:14px;cursor:pointer;border-radius:6px;border:1px solid var(--primary);height:auto}.workspace .action:hover{background:#2d574e}.workspace .action.secondary{background:white;color:var(--primary);border:1px solid #b7c5bc}.workspace .action.secondary:hover{background:#eef2e8}.workspace .action.destructive{background:white;color:#a13d2d;border:1px solid #e5b4a9}.workspace .action.destructive:hover{background:#fff1ed;border-color:#a13d2d}.table-actions{display:flex;gap:8px}.workspace .action.small{min-height:35px;padding:5px 12px}.workspace button:disabled{opacity:.45;cursor:not-allowed}.management-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:30px 0}.management-stats article{padding:25px;background:white;border:1px solid var(--border);border-radius:10px}.management-stats article&gt;span,.student-summary&gt;div&gt;span{font-size:14px;color:var(--muted);display:block}.management-stats strong,.student-summary strong{display:block;font-size:34px;font-weight:600;margin-top:10px}.management-stats strong small,.student-summary strong small{font-size:14px;font-weight:400;color:var(--muted)}.management-stats strong.status-text{font-size:25px}.threshold-panel{padding:30px;border:1px solid #bdcba9;border-radius:12px;background:#f0f4e9}.workspace h2{font-size:23px}.threshold-panel p{font-size:14px;margin-top:6px}.threshold-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:25px}.threshold-grid&gt;div{border-left:2px solid #b4c68e;padding-left:17px}.threshold-grid span{display:block;font-size:14px}.threshold-grid strong{display:block;font-size:30px;line-height:1.5;font-weight:600}.threshold-grid small{font-size:12px;color:var(--muted)}.publication-bar{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:25px 0}.publication-bar p{font-size:14px}.dashboard-tabs{height:auto!important;padding:5px!important;margin:12px 0 20px}.dashboard-tabs [role=tab]{padding:12px 28px;font-size:16px}.roster-layout{display:grid;grid-template-columns:1.45fr 1fr;gap:20px}.data-panel{padding:28px;background:white;border:1px solid var(--border);border-radius:10px;min-width:0}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}.panel-heading&gt;span{font-size:14px;color:var(--muted)}.data-panel table{font-size:15px}.data-panel th{height:45px;background:#f4f6f1}.data-panel td{padding:15px 10px}.data-panel th,.data-panel td{border-color:var(--border)}.cell-email{display:block;font-size:12px;color:var(--muted);margin-top:5px}.form-help{font-size:14px;margin:10px 0 20px}.entry-form label,.score-input-card label{display:grid;gap:8px;font-size:14px;margin:17px 0}.form-actions{display:flex;gap:10px;margin-top:25px;flex-wrap:wrap}.workspace fieldset{border:0;padding:0;margin:0;min-width:0}.workspace fieldset:disabled input,.workspace fieldset:disabled select{opacity:.6;background:#f5f6f3}.score-editor{margin-top:25px}.score-input-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}.score-input-card{padding:20px;border:1px solid var(--border);border-radius:8px;background:#fafbf8}.score-input-card h3{font-size:17px;font-weight:600}.dim{color:var(--muted)}.notice{padding:17px 20px;margin:20px 0;border:1px solid;border-radius:8px;font-size:15px}.notice.error{color:#8d3526;background:#fff1ed;border-color:#e5b4a9}.notice.success{color:#305232;background:#edf5e8;border-color:#c0d8b2}.empty-panel{padding:55px 35px;border:1px dashed #b7c5bc;border-radius:12px;background:white;margin-top:25px}.empty-panel h2{margin:15px 0}.empty-inline{padding:30px 0;font-size:15px}.student-summary{display:grid;grid-template-columns:1fr 1fr 2fr;gap:25px;padding:28px 32px;background:#eaf0df;border-radius:12px;margin:30px 0 40px;align-items:center}.student-summary p{font-size:14px}.day-section{margin:40px 0}.day-heading{display:flex;align-items:center;gap:18px;margin-bottom:20px}.day-heading&gt;span{font-size:12px;letter-spacing:1px;padding:7px 10px;background:var(--primary);color:#d8ef85;border-radius:4px}.day-heading h2{font-size:24px}.student-score-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}.student-score-card{padding:30px;background:white;border:1px solid var(--border);border-radius:12px}.student-score-card h3{font-size:20px;font-weight:600}.result-badge{font-size:13px;padding:6px 11px;border-radius:30px}.result-badge.pass{background:#e5efdf;color:#375b2e}.result-badge.below{background:#f9e9dc;color:#8b502d}.result-badge.pending{background:#f0f0ed;color:#646b61}.personal-score{font-size:54px;font-weight:600;line-height:1.2;margin:25px 0}.personal-score&gt;span{font-size:16px;color:var(--muted);font-weight:400}.score-track{height:9px;background:#edf0e8;position:relative;margin-top:30px;border-radius:5px}.score-fill{height:100%;background:#50796b;border-radius:5px}.score-track i{position:absolute;top:-5px;width:3px;height:20px}.pass-marker{background:#203d35;transform:translateX(-2px)}.border-marker{background:#ba7935;border:1px solid white;transform:translateX(1px)}.track-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:9px 0 22px}.grade-details{margin:0}.grade-details&gt;div{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #edf0e8;font-size:15px}.grade-details dt{color:var(--muted)}.grade-details dd{margin:0;font-weight:600}.score-note{font-size:12px;margin-top:17px}.score-legend{display:flex;gap:25px;font-size:13px}.score-legend span{display:flex;align-items:center;gap:8px}.score-legend i{display:block;width:3px;height:14px}.legend-fixed{background:#203d35}.legend-border{background:#ba7935}
+@media(max-width:1380px){.workspace{margin:0 6%}}@media(max-width:900px){.sign-in-layout{gap:35px}.roster-layout{grid-template-columns:1fr}.student-summary{grid-template-columns:1fr 1fr}.student-summary p{grid-column:1/-1}.new-workshop{max-width:420px}.threshold-grid{grid-template-columns:repeat(2,1fr)}.workspace h1{font-size:30px}.portal-header{flex-wrap:wrap;height:auto;padding-top:20px;padding-bottom:20px}.portal-header nav{order:3;flex-basis:100%;justify-content:center}.workshop-toolbar{flex-wrap:wrap}.new-workshop{max-width:none}.teacher-commandbar{grid-template-columns:1fr auto}.command-summary{grid-column:1/-1}.station-picker{grid-template-columns:repeat(2,1fr)}}@media(max-width:680px){.workspace{padding-top:25px}.workspace-heading{align-items:flex-start;flex-direction:column;gap:15px}.portal-header nav{display:flex;gap:28px;font-size:14px}.dashboard-title{align-items:flex-start;flex-direction:column;margin:25px 0}.sign-in-layout{grid-template-columns:1fr;padding:35px 0;gap:30px}.sign-in-layout h1{font-size:32px}.workspace .portal-panel{padding:25px}.workspace .button{padding:14px 18px}.new-workshop{flex-basis:100%;flex-wrap:wrap}.new-workshop input{flex:1;min-width:180px}.workshop-toolbar&gt;label{width:100%}.management-stats{gap:10px;grid-template-columns:1fr 1fr}.management-stats article{padding:18px}.management-stats article:last-child{grid-column:1/-1}.management-stats strong{font-size:28px}.management-stats strong.status-text{font-size:21px}.threshold-panel{padding:22px}.threshold-grid{gap:23px 10px}.threshold-grid&gt;div{padding-left:12px}.threshold-grid strong{font-size:26px}.publication-bar{flex-direction:column;align-items:flex-start}.data-panel{padding:20px}.score-input-grid{grid-template-columns:1fr}.student-score-grid{grid-template-columns:1fr}.student-score-card{padding:25px}.student-summary{padding:23px;gap:20px}.student-summary strong{font-size:30px}.student-summary strong small{display:block;margin-top:4px}.empty-panel{padding:30px 22px}.score-legend{gap:18px;flex-wrap:wrap}.login-facts{gap:12px;font-size:13px}.login-facts span+span{padding-left:12px}.teacher-heading,.teacher-commandbar,.publish-panel{align-items:flex-start;flex-direction:column;display:flex}.teacher-commandbar{gap:12px}.teacher-commandbar label{width:100%}.create-workshop-card,.single-score-form{display:grid;grid-template-columns:1fr}.teacher-tabs{overflow-x:auto}.teacher-tabs [role=tab]{font-size:14px}.workflow-intro{align-items:flex-start;flex-direction:column;gap:5px}.station-settings-grid,.station-picker{grid-template-columns:1fr}.panel-heading{align-items:flex-start;flex-direction:column}.threshold-chip{text-align:left}}
+
+.teacher-heading{display:flex;justify-content:space-between;align-items:end;gap:24px;margin:32px 0 20px}.teacher-heading h1{font-size:30px;margin-top:7px}.teacher-heading p{margin-top:7px;font-size:15px}.section-label{font-size:11px;font-weight:700;letter-spacing:.16em;color:#48766d}.teacher-commandbar{display:grid;grid-template-columns:minmax(220px,1fr) 1fr auto;align-items:end;gap:18px;padding:18px 20px;background:white;border:1px solid var(--border);border-radius:10px}.teacher-commandbar label{display:grid;gap:7px;font-size:13px;font-weight:600}.command-summary{display:flex;gap:12px;align-items:center;font-size:14px;color:var(--muted)}.command-summary span{padding:7px 10px;border-radius:5px;background:#f3f5f0}.command-summary .published,.status-badge.published{background:#e5efdf;color:#365a2e}.create-workshop-card{display:flex;gap:10px;align-items:center;padding:15px 20px;background:#f1f5ed;border:1px solid #d6e0ce;border-radius:9px;margin-top:10px}.create-workshop-card input{max-width:430px;flex:1}.teacher-tabs{width:100%!important;justify-content:flex-start!important;background:transparent!important;border-bottom:1px solid var(--border);border-radius:0!important;padding:0!important;margin:27px 0 20px!important}.teacher-tabs [role=tab]{flex:0 0 auto;padding:11px 18px!important;border-radius:7px 7px 0 0}.teacher-tabs [role=tab][data-active]{background:#eaf0df!important;color:var(--primary)!important}.workflow-intro{display:flex;gap:16px;align-items:baseline;padding:0 0 15px;color:var(--muted);font-size:14px}.workflow-intro strong{color:var(--primary);font-size:16px}.import-panel{margin-bottom:20px}.import-panel textarea,.station-setting textarea{display:block;width:100%;min-height:100px;border:1px solid #b7c5bc;border-radius:6px;padding:11px;font:inherit;resize:vertical;background:white;margin:0 0 12px}.station-settings-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px}.station-setting{border:1px solid var(--border);border-radius:9px;padding:20px;background:#fafbf8}.station-setting&gt;span{font-size:12px;color:#3e7168;font-weight:700}.station-setting label{display:grid;gap:7px;font-size:14px;margin-top:14px}.station-setting textarea{min-height:120px;margin:0}.station-picker{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}.station-card{min-height:134px;text-align:left;padding:17px;border:1px solid var(--border);border-radius:9px;background:white;color:var(--primary);cursor:pointer;display:flex;flex-direction:column;gap:8px}.station-card:hover{border-color:#7d9e90}.station-card.active{border:2px solid var(--primary);background:#eef4e8;padding:16px}.station-card span{font-size:12px;color:var(--muted)}.station-card strong{font-size:16px;line-height:1.35}.station-card small{font-size:12px;color:#536e67;margin-top:auto}.score-station-panel{margin-top:0}.threshold-chip{text-align:right;font-size:12px;color:var(--muted);white-space:nowrap}.threshold-chip strong{font-size:23px;color:var(--primary)}.single-score-form{display:grid;grid-template-columns:1fr 1fr auto;gap:15px;align-items:end}.single-score-form label{display:grid;gap:8px;font-size:14px}.publish-panel{display:flex;align-items:center;justify-content:space-between;gap:30px;min-height:170px}.publish-panel h2{margin:15px 0 8px}.publish-panel p{font-size:14px;color:var(--muted)}.status-badge{display:inline-block;padding:6px 10px;border-radius:99px;background:#f0f0ed;color:#5d675f;font-size:13px}
+.teacher-workflow-tabs{display:block!important;width:100%;min-width:0}.teacher-workflow-tabs [data-slot=tabs-content]{display:block!important;width:100%;min-width:0}.teacher-workflow-tabs [data-slot=tabs-list]{max-width:100%}
+.score-batch-form table{table-layout:fixed;min-width:980px}.score-batch-form th:nth-child(1){width:62px}.score-batch-form th:nth-child(2){width:18%}.score-batch-form th:nth-child(3){width:14%}.score-batch-form th:nth-child(4){width:16%}.score-batch-form td{vertical-align:top}.score-batch-form input[type=number],.score-batch-form [data-slot=native-select]{width:100%;min-width:88px;height:38px;font-size:14px}.score-batch-form textarea{width:100%;min-height:62px;border:1px solid #b7c5bc;border-radius:6px;padding:8px;font:inherit;font-size:13px;resize:vertical}.score-batch-form input[type=checkbox]{width:17px;height:17px;accent-color:var(--primary);margin-top:9px}.batch-save-bar{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-top:18px;padding:14px 0 0;border-top:1px solid var(--border);font-size:14px;color:var(--muted)}.batch-save-bar strong{color:var(--primary)}.qualitative-feedback{margin-top:18px;padding:14px 15px;border-left:3px solid #7d9e90;background:#f4f7f1;font-size:14px}.qualitative-feedback strong{color:var(--primary)}.qualitative-feedback p{margin:7px 0 0;white-space:pre-wrap;line-height:1.65}
+@media(max-width:900px){.teacher-commandbar{grid-template-columns:1fr auto}.command-summary{grid-column:1/-1}.station-picker{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:680px){.teacher-heading,.teacher-commandbar,.publish-panel{align-items:flex-start;flex-direction:column;display:flex}.teacher-commandbar{gap:12px}.teacher-commandbar label{width:100%}.create-workshop-card,.single-score-form{display:grid;grid-template-columns:1fr}.teacher-tabs{overflow-x:auto}.teacher-tabs [role=tab]{font-size:14px}.workflow-intro{align-items:flex-start;flex-direction:column;gap:5px}.station-settings-grid,.station-picker{grid-template-columns:1fr}.panel-heading{align-items:flex-start;flex-direction:column}.threshold-chip{text-align:left}}
+.workshop-control-card{display:grid;grid-template-columns:minmax(280px,1.3fr) minmax(230px,.8fr) auto;gap:24px;align-items:end;padding:28px 30px;background:linear-gradient(120deg,#eaf2e3,#f8faf6);border:1px solid #c8d8bd;border-radius:14px}.workshop-control-copy h2{font-size:25px;margin:8px 0}.workshop-control-copy p{font-size:14px;color:var(--muted)}.workshop-control-card&gt;label{display:grid;gap:8px;font-size:14px;font-weight:650}.workshop-control-card .command-summary{align-self:center;flex-wrap:wrap}.create-workshop-button{min-height:52px!important;font-size:16px!important;white-space:nowrap}.workflow-card-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:28px 0 22px}.workflow-card{min-height:142px;padding:20px;text-align:left;border:1px solid var(--border);border-radius:12px;background:white;color:var(--primary);cursor:pointer;display:flex;flex-direction:column;gap:9px;transition:.15s ease}.workflow-card:hover{border-color:#6d9485;transform:translateY(-1px)}.workflow-card.active{background:#eaf2e3;border:2px solid var(--primary);padding:19px}.workflow-card span{font-size:11px;letter-spacing:.12em;color:#5d8177;font-weight:700}.workflow-card strong{font-size:19px;line-height:1.35}.workflow-card small{font-size:13px;line-height:1.5;color:var(--muted);margin-top:auto}@media(max-width:900px){.workshop-control-card{grid-template-columns:1fr 1fr}.workshop-control-copy{grid-column:1/-1}.workflow-card-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:680px){.workshop-control-card{display:flex;flex-direction:column;align-items:stretch;padding:22px}.workshop-control-card .command-summary{align-self:stretch}.workflow-card-grid{grid-template-columns:1fr}.workflow-card{min-height:116px}}
+.workshop-control-card{grid-template-columns:minmax(260px,1.35fr) minmax(190px,.7fr) minmax(260px,1fr) auto;align-items:center}.workshop-summary{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}.workshop-summary span{padding:8px 10px;background:white;border:1px solid #dce4d8;border-radius:6px;white-space:nowrap}.workshop-summary b{color:var(--primary);font-size:16px}.workshop-summary .published{background:#e1f0d7;color:#315a2e;border-color:#c4dcb6}.roster-entry-grid{display:grid;grid-template-columns:1.25fr .9fr;gap:20px;align-items:stretch}.roster-entry-grid .data-panel{margin:0}.roster-current{margin-top:20px}.roster-current .panel-heading h2{margin-top:5px}@media(max-width:1100px){.workshop-control-card{grid-template-columns:1fr 1fr}.workshop-control-copy{grid-column:1/-1}.create-workshop-button{justify-self:start}.roster-entry-grid{grid-template-columns:1fr}}@media(max-width:680px){.workspace{margin-left:5%;margin-right:5%;padding-left:0;padding-right:0}.workshop-summary{width:100%}.create-workshop-button{width:100%}}
+.roster-sort-button{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;color:#34594e;font:inherit;font-weight:650;padding:7px 9px;margin:-7px -9px;border-radius:6px;cursor:pointer}.roster-sort-button:hover{background:#e7eee5;color:#173f39}.roster-sort-button.active{color:#176b5d;background:#e3eee7}.roster-sort-button:focus-visible{outline:2px solid #398274;outline-offset:2px}
+.station-days{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:24px}.station-day{padding:20px;border:1px solid var(--border);border-radius:10px;background:#fafbf8}.station-day&gt;header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:17px}.station-day&gt;header h2{font-size:21px;margin-top:5px}.station-day&gt;header&gt;span{padding:6px 9px;border-radius:99px;background:#e6eee0;color:#416457;font-size:12px}.station-day .station-settings-grid{grid-template-columns:1fr;margin:0}.add-station-card{min-height:190px;width:100%;text-align:left;padding:20px;border:1px dashed #9eb8a9;border-radius:9px;background:white;color:var(--primary);display:flex;flex-direction:column;gap:12px;cursor:pointer}.add-station-card:hover{background:#f0f6eb;border-color:var(--primary)}.add-station-card span{font-size:12px;color:var(--muted)}.add-station-card strong{font-size:18px}.add-station-card small{font-size:13px;color:var(--muted)}@media(max-width:900px){.station-days{grid-template-columns:1fr}}
+.profile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.profile-grid&gt;label{display:grid;gap:7px;font-size:14px}.hospital-picker{position:relative;display:grid;gap:7px;font-size:14px}.hospital-options{position:absolute;z-index:5;top:72px;left:0;right:0;max-height:240px;overflow:auto;padding:6px;background:white;border:1px solid #b7c5bc;border-radius:7px;box-shadow:0 8px 22px rgba(20,56,50,.14)}.hospital-options button{display:block;width:100%;padding:9px 10px;text-align:left;background:white;border:0;color:var(--primary);cursor:pointer}.hospital-options button:hover{background:#eef4e8}.hospital-options p{padding:8px;margin:0;font-size:13px}.hospital-picker small{font-size:12px;color:#477168}.profile-summary{margin:22px 0;padding:18px 20px;border:1px solid #c9dbbd;border-radius:10px;background:#f1f7ed}.profile-summary span{font-size:12px;color:#477168}.profile-summary strong{display:block;margin:5px 0;font-size:19px}.profile-summary p{font-size:14px}@media(max-width:900px){.profile-grid{grid-template-columns:1fr 1fr}}@media(max-width:680px){.profile-grid{grid-template-columns:1fr}}
+.borderline-explainer{display:grid;grid-template-columns:minmax(220px,.7fr) 1fr 1fr;gap:24px;padding:24px 28px;background:#fffaf0;border:1px solid #e5d2aa;border-radius:12px;margin:-18px 0 40px}.borderline-explainer h2{font-size:21px;margin-top:7px}.borderline-explainer p{font-size:14px;line-height:1.75;margin:0;color:#53615b}.borderline-explainer strong{color:#294b43}@media(max-width:900px){.borderline-explainer{grid-template-columns:1fr;margin-top:0}}
+.borderline-explainer .borderline-standard{color:#b42318;font-weight:700}
+
+/* Published OSCE cards: give narrative content its own rows. */
+.score-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:22px}
+.score-card-heading&gt;div{min-width:0;flex:1}
+.student-score-card .score-card-heading h3{font-size:22px;line-height:1.5;font-weight:700;overflow-wrap:anywhere}
+.score-card-heading .result-badge{flex-shrink:0;white-space:nowrap;margin-top:4px}
+.score-test-date{font-size:13px;line-height:1.6;color:#60736c;margin-top:8px;letter-spacing:0}
+.score-test-date time{margin-left:8px;white-space:nowrap}
+.score-case-details{display:grid;gap:16px;margin:0;padding:20px;background:#f5f7f2;border-radius:8px}
+.score-question-content{margin:14px 0 18px}.score-question-content h4{font-size:14px;font-weight:700;color:#365e57;margin:0 0 8px}.score-question-content .score-case-details{margin-top:0;grid-template-columns:1fr 1fr;gap:10px 18px;padding:14px 16px}.score-question-content .score-case-details&gt;div:last-child{grid-column:1/-1}.score-performance-grid{display:grid;grid-template-columns:minmax(210px,.8fr) minmax(300px,1.2fr);gap:20px;align-items:center}.score-performance-grid .personal-score{margin:0 0 14px}.score-performance-grid .score-track{margin-top:16px}.score-performance-grid .track-labels{margin-bottom:10px}.score-performance-grid .domain-radar{margin:0;padding:12px}.score-performance-grid .domain-radar figcaption{font-size:14px}.score-performance-grid .domain-radar svg{max-width:400px}
+.score-case-details:empty{display:none}
+.score-case-details dt{display:inline-block;padding:2px 7px;border-radius:4px;background:#e5eee7;font-size:13px;font-weight:750;color:#174943;margin-bottom:6px;letter-spacing:.03em}
+.score-case-details dd{margin:0;font-size:15px;line-height:1.85;color:#244b43;white-space:pre-wrap;overflow-wrap:anywhere}
+.student-score-card .qualitative-feedback{margin-top:22px;padding:18px 20px}
+.student-score-card .qualitative-feedback strong{display:block;font-size:14px;margin-bottom:8px}
+.student-score-card .qualitative-feedback p{font-size:15px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}
+.student-score-card .score-note{line-height:1.75;color:#65756f}
+@media(max-width:900px){.student-score-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.student-score-card{padding:20px}.student-score-card .score-card-heading h3{font-size:20px}.score-card-heading{gap:10px}.score-case-details{padding:16px}}
+@media(max-width:600px){.score-question-content .score-case-details,.score-performance-grid{grid-template-columns:1fr}.score-question-content .score-case-details&gt;div:last-child{grid-column:auto}.score-performance-grid{gap:16px}.score-performance-grid .domain-radar svg{max-width:340px}}
+.student-score-card .personal-score.score-failed{color:#b42318}
+.student-score-card .result-badge.below{background:#fff0ee;color:#b42318}
+
+/* Visual refinement: preserve controls and workflow, reduce decorative height. */
+.workspace{padding-top:28px}
+.teacher-heading{margin-bottom:20px}
+.workspace h1{font-size:30px;line-height:1.35}
+.workshop-control-card{padding:20px 24px;gap:18px}
+.workshop-control-copy h2{font-size:23px}
+.workflow-card-grid{margin:20px 0 18px;gap:12px}
+.workflow-card{min-height:110px;padding:16px;gap:7px}
+.workflow-card.active{padding:15px}
+.workflow-card strong{font-size:17px}
+.workflow-card small{line-height:1.5}
+.data-panel th,.data-panel td,.data-panel tr{border-color:#dce5df}
+.data-panel td{padding:12px 10px;vertical-align:top}
+.data-panel th{font-weight:650;color:#34594e}
+.score-batch-form textarea{min-height:56px;line-height:1.6}
+.account-card h3{font-size:19px;font-weight:700;line-height:1.5;overflow-wrap:anywhere}
+.account-card p{line-height:1.7;margin-top:8px;color:#536b63}
+.account-card .account-status{display:inline-block;padding:4px 10px;border-radius:20px;font-size:13px;font-weight:650;margin:14px 0;background:#f2f4f1}
+.account-card .account-status.active{background:#e8f2e3;color:#315c35}
+.account-card .account-status.pending{background:#fff5df;color:#785615}
+.account-card .account-status.disabled{background:#fff0ee;color:#a13d2d}
+.account-card .action{display:flex;margin-top:8px}
+.student-score-card .personal-score{margin-top:12px}
+.student-score-card .score-case-details{margin-top:22px}
+.student-summary&gt;div:nth-child(2) strong{font-size:24px;line-height:1.5}
+@media(max-width:680px){
+ .workspace{padding-top:24px}
+ .workspace h1{font-size:26px}
+ .workshop-control-card{padding:18px;gap:14px}
+ .workflow-card-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .workflow-card{min-height:112px;padding:12px}
+ .workflow-card.active{padding:11px}
+ .workflow-card strong{font-size:15px}
+ .workflow-card small{font-size:12px}
+ .data-panel{padding:18px}
+ .day-heading{align-items:flex-start;flex-direction:column;gap:10px}
+ .student-summary&gt;div:nth-child(2) strong{font-size:21px}
+ .borderline-explainer{padding:20px;gap:14px;margin-bottom:24px}
+ .score-batch-form::before{content:"表格可左右滑動，查看分數、評等與回饋";display:block;font-size:13px;color:#536b63;margin-bottom:12px}
+}
+
+/* Keep the workshop selector, metrics and action on the same baseline. */
+.workshop-control-card{align-items:end}
+.workshop-control-card [data-slot=native-select]{height:48px}
+.workshop-summary{align-items:stretch}
+.workshop-summary&gt;span{display:flex;align-items:center;gap:3px;height:48px;box-sizing:border-box}
+.workshop-control-card .create-workshop-button{height:48px;min-height:48px!important}
+.workshop-control-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}.workshop-control-actions .action{width:100%;margin:0}
+@media(max-width:680px){.workshop-control-card{align-items:stretch}}
+</pre></details></html>

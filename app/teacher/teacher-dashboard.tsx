@@ -147,8 +147,10 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
         </NativeSelect>
       </label>
       <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>{stations.length}</b> 個 OSCE 題目</span><span className={rosterLocked ? 'published' : ''}>{publishedStationKeys.size === 0 ? '成績未公告' : publishedStationKeys.size === stations.length ? '全部題目已公告' : `已公告 ${publishedStationKeys.size} / ${stations.length} 題`}</span></div>
-      <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
-      {canManageWorkshops && <Button className="action secondary" disabled={busy} onClick={() => setShowArchive(value => !value)}>{showArchive ? '取消封存' : '封存此梯次'}</Button>}
+      <div className="workshop-control-actions">
+        <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
+        {canManageWorkshops && <Button className="action secondary" disabled={busy} onClick={() => setShowArchive(value => !value)}>{showArchive ? '取消封存' : '封存此梯次'}</Button>}
+      </div>
     </section>
     {showArchive && canManageWorkshops && <section className="create-workshop-card"><ConfirmWorkshopAction key={data.selected.id} action="archive" workshop={data.selected} onCancel={() => setShowArchive(false)} onSuccess={async () => {
       const name = data.selected!.name;
