@@ -17,8 +17,8 @@ export function BackendApplication({ email }: { email: string }) {
   return <BackendEntryLayout>
     <h2 className="text-2xl font-black">後臺管理系統登入</h2>
     <div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
-      <p className="break-all font-bold">目前登入帳號：{email}</p>
-      <p className="mt-2 leading-7">此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。</p>
+      <p className="break-all font-bold" style={{ color: 'inherit' }}>目前登入帳號：{email}</p>
+      <p className="mt-2 leading-7" style={{ color: 'inherit' }}>此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。</p>
     </div>
     <div className="mt-6 flex flex-col gap-4">
       <Button type="button" disabled={signingOut} className="h-auto min-h-12 whitespace-normal py-3" onClick={async () => {

@@ -251,8 +251,8 @@ export function BackendApplication({ email }: { email: string }) {
   return &lt;BackendEntryLayout&gt;
     &lt;h2 className="text-2xl font-black"&gt;後臺管理系統登入&lt;/h2&gt;
     &lt;div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700"&gt;
-      &lt;p className="break-all font-bold"&gt;目前登入帳號：{email}&lt;/p&gt;
-      &lt;p className="mt-2 leading-7"&gt;此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。&lt;/p&gt;
+      &lt;p className="break-all font-bold" style={{ color: 'inherit' }}&gt;目前登入帳號：{email}&lt;/p&gt;
+      &lt;p className="mt-2 leading-7" style={{ color: 'inherit' }}&gt;此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。&lt;/p&gt;
     &lt;/div&gt;
     &lt;div className="mt-6 flex flex-col gap-4"&gt;
       &lt;Button type="button" disabled={signingOut} className="h-auto min-h-12 whitespace-normal py-3" onClick={async () =&gt; {
