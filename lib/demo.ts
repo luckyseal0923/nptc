@@ -1,4 +1,5 @@
 import { domainTotal, validateDomainMax, validateDomainScores, type DomainValues } from './domains';
+import { REQUIRED_SCHEMA_VERSION } from './schema';
 import { computeThreshold, DEFAULT_STATIONS, type StationDefinition } from './grading';
 
 // 正式模式：所有名冊、題目與成績都由 Supabase 儲存。
@@ -6,7 +7,7 @@ export const DEMO_MODE = false;
 
 type DemoRole = 'teacher' | 'student';
 type DemoUser = { role: DemoRole; username: string; email: string };
-type Workshop = { id: string; name: string; published: number; publishedStations?: string[]; created_at: string; stations: StationDefinition[] };
+type Workshop = { id: string; name: string; published: number; stations_revision?: number; publishedStations?: string[]; created_at: string; stations: StationDefinition[] };
 type Student = Record<string, unknown> & {
   id: string;
   workshop_id: string;
@@ -22,7 +23,7 @@ type Student = Record<string, unknown> & {
   revision: number;
   updated_at: string;
 };
-type State = { workshops: Workshop[]; students: Student[] };
+type State = { workshops: Workshop[]; students: Student[]; createRequests?: Record<string,{ id: string; name: string }> };
 
 const storageKey = 'nptc-demo-state-v1';
 const sessionKey = 'nptc-demo-user-v1';
@@ -86,17 +87,26 @@ export function signOutDemo() { localStorage.removeItem(sessionKey); }
 
 function requireUser() { const user = demoUser(); if (!user) throw new Error('請先登入。'); return user; }
 function requireTeacher() { const user = requireUser(); if (user.role !== 'teacher') throw new Error('此帳號沒有老師權限。'); return user; }
+async function hospitalDirectory(): Promise<{ hospitals: { name: string; city: string; level: string }[] }> {
+  const response = await fetch(`${import.meta.env?.BASE_URL || '/'}data/accredited-hospitals.json`);
+  if (!response.ok) throw new Error('官方醫院名冊暫時無法載入。');
+  return response.json();
+}
 
 export async function demoRpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   const user = requireUser();
   if (name === 'nptc_is_teacher') return (user.role === 'teacher') as T;
+  if (name === 'nptc_schema_version') return REQUIRED_SCHEMA_VERSION as T;
+  if (name === 'nptc_hospital_directory') return await hospitalDirectory() as T;
+  if (name === 'nptc_sync_student_email') return { ok: true } as T;
+  if (name === 'nptc_is_account_reviewer') return false as T;
   const data = state();
-  if (name === 'nptc_teacher_data') {
+  if (name === 'nptc_teacher_data' || name === 'nptc_analysis_data') {
     requireTeacher();
     const requested = args.requested_workshop as string | null | undefined;
     const selected = data.workshops.find(item => item.id === requested) ?? data.workshops[0] ?? null;
     const students = selected ? data.students.filter(item => item.workshop_id === selected.id).sort((a, b) => a.name.localeCompare(b.name, 'zh-TW')) : [];
-    return { workshops: data.workshops, selected, students, thresholds: selected ? thresholds(students, selected.stations) : [] } as T;
+    return { includesArchived: false, workshops: data.workshops, selected, students, thresholds: selected ? thresholds(students, selected.stations) : [] } as T;
   }
   if (name === 'nptc_student_data') {
     const records = data.students.filter(item => item.email === user.email).map(student => {
@@ -104,7 +114,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
       const visibleStations = workshop.stations.filter((station) => (workshop.publishedStations ?? (workshop.published ? workshop.stations.map((item) => item.key) : [])).includes(station.key));
       const published = visibleStations.length ? 1 : 0;
       return {
-        id: student.id, name: student.name, email: student.email, phone: student.phone, workshopName: workshop.name, published,
+        id: student.id, name: student.name, email: student.email, phone: student.phone, workshopName: workshop.name, archived: false, published,
         profile: { nursingYears: student.nursing_years ?? null, hospital: student.hospital ?? '', unit: student.unit ?? '', examSpecialty: student.exam_specialty ?? '', firstOsce: student.first_osce ?? null, birthDate: student.birth_date ?? '' },
         stations: visibleStations,
         updatedAt: published ? student.updated_at : null,
@@ -139,40 +149,50 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     const body = args.body as { nursingYears?: number; hospital?: string; unit?: string; examSpecialty?: string; firstOsce?: boolean; birthDate?: string };
     if (!Number.isInteger(body.nursingYears) || body.nursingYears! < 0 || body.nursingYears! > 60 || !body.hospital?.trim() || !body.unit?.trim() || !body.examSpecialty?.trim() || typeof body.firstOsce !== 'boolean' || !/^\d{4}-\d{2}-\d{2}$/.test(body.birthDate ?? '')) throw new Error('請完整填寫個人資料。');
     data.students.filter((student) => student.email === user.email).forEach((student) => Object.assign(student, { nursing_years: body.nursingYears, hospital: body.hospital!.trim(), unit: body.unit!.trim(), exam_specialty: body.examSpecialty!.trim(), first_osce: body.firstOsce, birth_date: body.birthDate }));
+    if (!(await hospitalDirectory()).hospitals.some(h=>h.name===body.hospital)) throw new Error('請從目前的官方醫院名冊選擇服務醫院。');
+    if (body.birthDate! > new Date().toISOString().slice(0,10) || body.birthDate! < '1900-01-01' || !['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].includes(body.examSpecialty!)) throw new Error('請確認出生年月日與科別。');
     save(data); return { ok: true } as T;
   }
   if (name !== 'nptc_teacher_write' && name !== 'nptc_teacher_save_stations' && name !== 'nptc_teacher_save_stations_v3' && name !== 'nptc_teacher_publish_station') throw new Error('不支援的展示資料操作。');
   const teacher = requireTeacher();
   const body = args.body as Record<string, unknown>;
-  const action = body.action as string;
+  const action = name.includes('save_stations') ? 'saveStations' : name === 'nptc_teacher_publish_station' ? 'publishStation' : body.action as string;
+  if (action === 'publish' || action === 'saveScores') throw new Error('請使用逐題公布與五面向成績表。');
   const now = new Date().toISOString();
   if (action === 'createWorkshop') {
     const name = String(body.name ?? '').trim(); if (!name) throw new Error('請輸入梯次名稱。');
-    const id = crypto.randomUUID(); data.workshops.unshift({ id, name, published: 0, created_at: now, stations: structuredClone(DEFAULT_STATIONS) }); save(data); return { id } as T;
+    if (typeof body.requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.requestId)) throw new Error('請重新載入後建立梯次。');
+    const previous = data.createRequests?.[body.requestId];
+    if (previous) { if(previous.name!==name)throw new Error('建立請求的名稱不同，請重新整理。'); return { id: previous.id } as T; }
+    const id = crypto.randomUUID(); data.createRequests ??= {}; data.createRequests[body.requestId] = { id, name }; data.workshops.unshift({ id, name, stations_revision: 0, published: 0, created_at: now, stations: structuredClone(DEFAULT_STATIONS) }); save(data); return { id } as T;
   }
   const workshop = data.workshops.find(item => item.id === body.workshopId);
   if (!workshop) throw new Error('找不到此梯次。');
-  if (action === 'publish') {
-    const published = Boolean(body.published);
-    if (published && !data.students.some(item => item.workshop_id === workshop.id && workshop.stations.some(({ key }) => item[`${key}_score`] !== null))) throw new Error('至少登錄一筆成績後才能公布。');
-    workshop.published = published ? 1 : 0; save(data); return { ok: true } as T;
-  }
-  if (workshop.published) throw new Error('請先撤回公布，再修改名冊或成績。');
+  const visibleStations = new Set(workshop.publishedStations ?? (workshop.published ? workshop.stations.map(s=>s.key) : []));
+  if (['saveStudent','deleteStudent','bulkImportStudents'].includes(action) && visibleStations.size) throw new Error('請先撤回本梯次所有題目公告，再修改名冊。');
   const id = body.id as string | undefined;
   const current = id ? data.students.find(item => item.id === id && item.workshop_id === workshop.id) : undefined;
   if (id && (!current || current.revision !== body.revision)) throw new Error('資料已更新，請重新載入後再編輯。');
   if (action === 'deleteStudent') { data.students = data.students.filter(item => item !== current); save(data); return { ok: true } as T; }
   if (action === 'saveStations') {
+    if (body.stationsRevision !== (workshop.stations_revision ?? 0)) throw new Error('題目設定已更新，請重新載入後再編輯。');
     const stations = body.stations as StationDefinition[];
+    for (const previous of workshop.stations) {
+      const next=stations?.find(s=>s.key===previous.key);
+      if(visibleStations.has(previous.key) && JSON.stringify(previous)!==JSON.stringify(next)) throw new Error('請先撤回本題公告，再修改題目。');
+      if(!next && data.students.some(s=>s.workshop_id===workshop.id && (s[`${previous.key}_score`]!=null || !!s[`${previous.key}_feedback`]))) throw new Error('有成績、回饋或已公告的題目不可刪除。');
+    }
+    if (new Set(stations?.map(s=>s.key)).size !== stations?.length) throw new Error('題目代碼不可重複。');
     if (!Array.isArray(stations) || !stations.length) throw new Error('請至少新增一題 OSCE 題目。');
     workshop.stations = stations.map((station, index) => { const title = String(station?.title ?? '').trim(), testDate = String(station?.testDate ?? ''), complaint = String(station?.complaint ?? '').trim(), diagnosis = String(station?.diagnosis ?? '').trim(), prompt = String(station?.prompt ?? '').trim(); if (!station?.key || !title || !testDate || !complaint || !diagnosis || !prompt) throw new Error('每題都必須完成題目名稱、測驗日期、個案主訴、最終診斷與命題內容摘要。'); const previous=workshop.stations.find(s=>s.key===station.key); const domainMax=station.domainMax ? validateDomainMax(station.domainMax) : undefined; if(!domainMax && (!previous?.title || previous.domainMax))throw new Error('請填寫五面向滿分。'); if(JSON.stringify(previous?.domainMax)!==JSON.stringify(domainMax) && data.students.some(s=>s.workshop_id===workshop.id && s[`${station.key}_domains`]))throw new Error('已有分項成績，不能變更配分。'); return { key: String(station.key), title, testDate, complaint, diagnosis, prompt, ...(domainMax ? {domainMax} : {}) }; });
+    workshop.stations_revision=(workshop.stations_revision ?? 0)+1;
     save(data); return { ok: true } as T;
   }
   if (action === 'publishStation') {
     const station = String(body.station ?? ''); const published = Boolean(body.published);
     if (!workshop.stations.some((item) => item.key === station)) throw new Error('找不到指定題目。');
     if (published && !data.students.some((item) => item.workshop_id === workshop.id && item[`${station}_score`] !== null && item[`${station}_score`] !== undefined)) throw new Error('本題至少要有一筆已登錄成績才能公布。');
-    const visible = new Set(workshop.publishedStations ?? []); published ? visible.add(station) : visible.delete(station); workshop.publishedStations = [...visible]; save(data); return { ok: true } as T;
+    const visible = visibleStations; published ? visible.add(station) : visible.delete(station); workshop.publishedStations = [...visible]; workshop.published=0; workshop.stations_revision=(workshop.stations_revision ?? 0)+1; save(data); return { ok: true } as T;
   }
   if (action === 'bulkImportStudents') {
     const rows = body.students as Array<{ name?: string; email?: string; phone?: string }>;
@@ -196,11 +216,6 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     if (current) { Object.assign(current, { name, email, phone, revision: current.revision + 1, updated_at: now, updated_by: teacher.email }); }
     else data.students.push({ id: crypto.randomUUID(), workshop_id: workshop.id, name, email, phone, revision: 0, q1_score: null, q1_rating: null, q2_score: null, q2_rating: null, q3_score: null, q3_rating: null, q4_score: null, q4_rating: null, updated_at: now, updated_by: teacher.email });
     save(data); return { ok: true } as T;
-  }
-  if (action === 'saveScores' && current) {
-    const grades = body.grades as Record<string, { score: number | null; rating: number | null }>;
-    for (const { key } of workshop.stations) { current[`${key}_score`] = grades[key].score; current[`${key}_rating`] = grades[key].rating; }
-    current.revision += 1; current.updated_at = now; current.updated_by = teacher.email; save(data); return { ok: true } as T;
   }
   throw new Error('不支援的操作。');
 }

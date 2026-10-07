@@ -1,103 +1,110 @@
-# 為國考而訓：靜態前端 + Supabase
+# 為國考而訓：React／Vite 前端與 Supabase
 
-前端使用 React + Vite，建置結果為 `dist/`，只包含 HTML、CSS、JavaScript 與圖片。正式服務不需要 Node、Cloudflare Worker 或 D1。
+前端是 React＋Vite 靜態網站，建置結果在 dist/。資料庫讀寫透過 Supabase RPC，學員首次啟用由 Edge Function 處理。本文以資料庫版本 2026100701 為準。
 
-## 目前登入方式
+## 登入與帳號
 
-目前採用 Supabase 正式模式。老師與學員均使用 Email 驗證連結登入，老師端新增或匯入的名冊會直接寫入 Supabase。
+- 後臺：Email＋密碼登入。新申請者須確認信箱並經系統管理者啟用，未啟用與停用帳號不能讀寫課程。
+- 學員：老師先建立姓名、Email、手機名冊；學員以三項資料首次啟用，由 student-activate 核對名冊並建立 Auth 帳號，接著補齊個人資料與設定密碼。之後使用 Email＋密碼登入。
+- 首次啟用沿用免寄驗證信的名冊核對流程；不能把 Auth 內部的 email_confirmed_at 解讀成曾實際收過驗證信。後臺申請、忘記密碼及 Email 變更需要可用 SMTP。
+- 已建立帳號的 Email 不能由管理員直接改名冊。學員在專區申請變更，完成 Auth 的信箱確認後，系統按同一個 user_id 同步目前及封存名冊；成績不搬動。若新 Email 與同梯次既有名冊衝突，同步會整筆回復，原紀錄仍保留，需由系統管理者核對。
+- .env.local 僅放前端可公開的 publishable／anon key；service-role key 只能放 Edge Function 的伺服器環境。
 
-如要離線展示，可將 `lib/demo.ts` 的 `DEMO_MODE` 改為 `true`；展示模式不會寄出驗證信或寫入 Supabase：
-
-- 老師帳號：`teacher`／`demo1234`
-- 學員帳號：`student`／`demo1234`
-
-展示資料只存在使用者目前瀏覽器的 localStorage。姓名、Email 與手機電話用於辨識學員與課程聯絡。
-
-## 啟動與建置
-
-1. `.env.local` 已提供 Supabase API URL 與 anon key。變數名稱見 `.env.example`。這兩個值會在建置時加入前端；不得改放 secret/service_role key。
-2. 安裝：`pnpm install`
-3. 開發：`pnpm dev`
-4. 建置：`pnpm build`
-5. 預覽：`pnpm start`
-
-若本機 pnpm 包裝器要求重新安裝，可直接執行已安裝套件：
+## 本機開發與檢查
 
 ```powershell
-node node_modules/vite/bin/vite.js build
-node scripts/static-routes.mjs
-node node_modules/vite/bin/vite.js preview --host 127.0.0.1
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm check
+pnpm build
 ```
 
-首頁 `/`、老師 `/teacher/`、學員 `/student/` 都有靜態 HTML 入口，適合掛在網域根目錄。若部署至子目錄，需另調整連結與資產基底路徑。
+.env.local 設定 NEXT_PUBLIC_SUPABASE_URL 與 NEXT_PUBLIC_SUPABASE_ANON_KEY。前端只有這兩個公開值會進入建置；Vite 會拒絕 service-role key。pnpm check 執行前端及 Edge 的 TypeScript 檢查與完整本機測試，PGlite 是正式 devDependency，不必另裝 .verify-accounts 套件。Edge 型別檢查使用本機 Deno 宣告；部署環境仍須實測原生 Edge 執行。
 
-## Supabase 初始化
+GitHub Pages workflow 在部署前執行 pnpm check；SQL 與 Edge 不會因前端 workflow 而自動安裝。
 
-在對應專案的 SQL Editor 執行 `supabase/setup.sql`。老師信箱已設定為 `chin.wei.chang0923@gmail.com`。
+## 資料庫安裝與升級
 
-若已執行過初版設定，依序執行 `supabase/upgrade-workshop-management.sql`、`supabase/upgrade-score-feedback.sql`、`supabase/upgrade-student-phone.sql`、`supabase/upgrade-student-profile.sql` 與 `supabase/upgrade-dynamic-osce-stations.sql`。最後一份腳本將 OSCE 題目與成績改為不限題數，並支援逐題公布。
+### 全新、尚未建立 NPTC 資料表的資料庫
 
-- 啟用 Email 驗證登入與註冊，並設定可寄信的 SMTP。自架 Supabase 的環境設定需在 Zeabur 修改。
-- 將 Site URL 設定為正式前端網址，Redirect URLs 加入正式網址 `/student/` 與 `/teacher/`，本機測試另加入 `http://127.0.0.1:5173/student/` 與 `/teacher/`。
-- 驗證信可使用登入連結；若希望輸入驗證碼，Email 模板必須包含 `{{ .Token }}`。
-- 勿關閉 Email 驗證；權限依 Supabase 簽署的登入 Email 判斷。
-- 啟用正式登入前，需在 Supabase Auth 建立老師與學員的 Email／密碼帳號。批次建立帳號應由受保護的 Supabase Edge Function 或 Auth 管理介面完成，不能在靜態前端放置 service-role key。
+在 Supabase SQL Editor 執行完整 supabase/install.sql。此檔由 scripts/build-supabase.mjs 產生，包含所有必要前置升級及現行修正，不依賴已停用的 invitation RPC。
 
-## 權限與資料
+### 既有資料庫
 
-資料保存在 `nptc_private` schema。資料表啟用 RLS 並撤銷 anon/authenticated 的直接存取，只開放四個 public RPC。函式固定 search_path，並逐次檢查登入身分與老師名單。
+先保留資料庫備份並記錄梯次、學員與成績筆數。若已完成五面向評分、學員啟用、兩級角色與敏感操作，只需執行完整 supabase/upgrade-project-consistency.sql。此檔以交易執行，可重跑，保留既有資料與封存狀態。
 
-- `nptc_is_teacher()`：查詢目前帳號的老師權限。
-- `nptc_teacher_data(requested_workshop)`：老師取得梯次、名冊及邊緣及格分數。
-- `nptc_teacher_write(body)`：老師建立梯次、儲存學員與成績、公布及撤回。
-- `nptc_student_data()`：學員只取得本人資料，未公布時不回傳分數或邊緣及格分數。
+若缺少前置功能，只補尚未安裝的檔案，順序如下：
 
-每題分數 0–100，Rating 為 1–5 整數；兩欄成對填寫或留空。固定及格線 60 分。邊緣及格分數為該梯次 Rating=3 的平均。公布後禁止修改，撤回後才能編輯；revision 防止覆寫新版資料，梯次鎖防止公布與修改互相競爭。
+1. setup.sql
+2. upgrade-workshop-management.sql
+3. upgrade-score-feedback.sql
+4. upgrade-student-phone.sql
+5. upgrade-student-profile.sql
+6. upgrade-dynamic-osce-stations.sql
+7. upgrade-backend-accounts.sql
+8. upgrade-student-activation.sql
+9. upgrade-roster-account-status.sql
+10. upgrade-domain-scores.sql
+11. upgrade-student-roster-activation.sql
+12. upgrade-admin-roles.sql
+13. upgrade-workshop-sensitive-actions.sql
+14. upgrade-project-consistency.sql
 
-每個梯次可新增不限數量的 OSCE 題目；每題記錄題目名稱、測驗日期、個案主訴、最終診斷與命題內容摘要。名冊可由 Excel 貼上「姓名、Email、手機電話」三欄批次匯入；名冊中的手機電話會遮蔽顯示。老師可以逐題公布或撤回成績，學員只能查看已公布題目的個人成績與邊緣及格分數。
+已安裝 2026100701 後，舊 setup 與 upgrade 檔會主動停止，避免覆蓋新版的帳號、封存及成績保護。不要把 install.sql 當成既有資料庫的修復檔。repair-student-phone-write.sql 也不再以文字取代方式改動函式；完整升級已包含手機寫入修正。
 
-服務醫院以政府開放資料的「衛生福利部評鑑合格之醫院名單」提供搜尋選取；每次 GitHub Pages 部署及每日排程建置時，都會重新擷取公開 JSON，產生網站可讀取的快取名冊。前端只可點選完整院名，不能自行輸入。
+完整唯讀安裝與歷史資料檢查請執行 supabase/verify-project-consistency.sql；若舊資料出現已公布題目缺漏或分項超過配分，須核對原始評分紀錄，不會以程式猜測改分。基本確認（SQL Editor）：
 
-舊 D1 後端程式已從此專案移除。若舊 D1 資料庫仍有正式名冊，需要另外匯出後再匯入 Supabase。
-
-## 檢查
-
-```powershell
-node --test tests/grading.test.mjs
-node node_modules/typescript/bin/tsc --noEmit
-node scripts/check-supabase.mjs
+```sql
+select max(version) as installed_version from nptc_private.schema_migrations;
+select to_regprocedure('public.nptc_analysis_data(uuid)') as analysis_rpc,
+       to_regprocedure('public.nptc_sync_student_email()') as email_sync_rpc,
+       to_regprocedure('public.nptc_hospital_directory()') as directory_rpc;
+select count(*) as hospital_count from nptc_private.hospital_directory;
+select count(*) as workshops from nptc_private.workshops;
+select count(*) as students from nptc_private.students;
+select count(*) as grades from nptc_private.station_grades;
 ```
 
-連線檢查只輸出 HTTP 狀態，不顯示金鑰。未登入呼叫已安裝的 RPC 應被拒絕。
+正常版本至少為 2026100701，三支 RPC 均存在；資料筆數應符合升級前的紀錄。前端登入時也檢查版本，未升級時顯示明確提示。
 
-## 後臺帳號申請與啟用
+## Edge Function、SMTP 與部署順序
 
-執行 `supabase/upgrade-backend-accounts.sql` 後，後臺登入頁提供「申請帳號」。申請者先透過 Email 驗證身分，再填姓名與用途；申請不會自動授予後臺權限。
+1. 完成上述 SQL 升級。
+2. 部署 supabase/functions/student-activate/index.ts，伺服器設定 SUPABASE_URL 與 SUPABASE_SERVICE_ROLE_KEY。若自架 Kong API key 與資料庫 JWT 分開設定，JWT_SECRET 必須與 Auth／PostgREST 的共享設定一致；機密僅放伺服器。CLI 使用 supabase/config.toml 的 functions.student-activate.verify_jwt=false，因為首次啟用者尚未登入；僅此函式允許匿名進入，內部仍以 service-only RPC 核對名冊、拒絕既有帳號並限制嘗試次數。自架環境須另外確認 functions gateway／runtime 有套用相同設定，單純放入 config.toml 不會自動更新 Zeabur。
+3. 確認 Auth 的 Site URL、Redirect URLs、SMTP 與 Email 變更確認設定。使用實際部署網址的 /teacher/、/student/ 及各自 ?reset=1；GitHub Pages 部署要包含 /nptc/ 前綴。Email 變更應保留 secure email change，依設定確認新舊信箱。不要以全域自動確認略過後臺申請或 Email 變更。
+4. 部署新版 dist/。先升級 SQL，再部署前端；舊頁籤的題目寫入若未帶版本會被拒絕，請重新整理頁面。
+5. 使用測試名冊驗收首次啟用、登出／密碼登入、重設密碼、部分公布、名冊鎖定、封存／還原、系統管理者分析封存紀錄及 Email 變更。永久刪除只用可拋棄測試梯次，由真人重新輸入系統管理者 Email、密碼與梯次名稱驗收。
 
-初始系統管理者為既有審核帳號。登入後可在「帳號管理」啟用或停用申請者。一般已啟用帳號可管理所有工作坊，但不能審核其他帳號。停用立即影響後續 RPC，重新啟用不會刪除其既有資料。
+本機 SQL 測試、建置成功與已推送程式都不等於正式服務已完成這些步驟。
 
-### 後臺兩級權限與梯次封存
+## 權限、評分與資料一致性
 
-在上述升級及 `supabase/upgrade-domain-scores.sql`、`supabase/upgrade-roster-account-status.sql` 完成後，執行 `supabase/upgrade-admin-roles.sql`。一般管理員可建立梯次、管理學員名冊與題目、登錄與公布成績；系統管理者額外可編輯帳號姓名與申請用途、啟用或停用帳號、升降系統管理者權限，以及封存或還原梯次。新啟用帳號預設為一般管理員。初始系統管理者不得被降權或停用，管理者也不能自行降權或停用。
+nptc_private 資料表啟用 RLS，anon／authenticated 沒有直接資料表權限。public RPC 逐次檢查身分與權限；一般管理員可管理未封存課程、名冊、題目、成績與公布；系統管理者額外可管理帳號、封存、還原與永久刪除。初始系統管理者及自身帳號受到降權／停用保護。
 
-封存取代永久刪除：已封存梯次會從後臺日常清單移除，保留學員、題目與成績，且無法再修改；系統管理者可在「帳號管理」頁還原。先前已公布的成績仍可由原學員查看。此升級需在正式 Supabase SQL Editor 執行後才會生效；本機建置與測試不代表正式環境已更新。權限及封存回歸測試：`node tests/admin-roles.mjs`。
+- 五大面向滿分皆大於 0、合計 100；後端重新加總得分，不能信任前端送來的總分。分數與 Global Rating 成對填寫或留空；0 分有效。
+- 每題以該梯次該題 Rating＝3 的平均分數為邊緣及格線；沒有可用資料時尚無法判定，沒有固定 60 分及格線。
+- 題目逐題公布／撤回。公布後該題題目與成績鎖定；已有分項成績就不能變更配分。只要有任何題目公布，整份名冊即鎖定，避免刪除學員改變已公布門檻。
+- 題目 stations_revision、學員 revision 與梯次鎖共同防止舊草稿覆寫及公布／寫入競爭。新增梯次以管理員＋requestId 記錄建立請求；網路重試回傳同一個梯次。
+- 所有舊版題目寫入都轉至現行保護；舊整梯次公布及總分寫入拒絕使用。
+- 封存保留歷史題目、背景與成績；個人背景資料僅更新未封存名冊，經 Auth 確認的 Email 變更為可稽核的身分同步例外。
+- 日常課程清單不包含封存梯次；系統管理者的學習分析含封存歷史，一般管理員分析限未封存梯次，畫面會標明範圍。
+- 封存與永久刪除需要兩分鐘內的密碼登入及一次性 session；永久刪除還需已封存與完整梯次名稱，由後端再次授權。
 
-Supabase 需啟用 Email 註冊與可用 SMTP，Redirect URLs 需包含 `https://luckyseal0923.github.io/nptc/teacher/` 及 `https://luckyseal0923.github.io/nptc/student/`。既有帳號與申請資料保存在私有 schema，僅透過檢查權限的 RPC 存取。資料庫升級尚未執行時介面會提示設定未完成，不會改用展示資料。
+## 官方醫院清單
 
-帳號權限回歸測試：先執行 npm install --prefix .verify-accounts --no-package-lock --no-save @electric-sql/pglite，再執行 node tests/backend-accounts.mjs。測試使用隔離 PostgreSQL 引擎，不會連接正式資料庫。
+scripts/sync-hospitals.mjs 擷取官方公開名冊並保留 public/data/accredited-hospitals.json 快取。pnpm build:sql 依快取重建 SQL 種子；新版前端與後端都使用已安裝的 nptc_private.hospital_directory，避免兩套名單不同步。
 
-## 學員首次啟用與密碼登入
+更新快取或每日前端建置不會自動改正式資料庫名冊。要更新正式清單，重新產生 SQL，檢閱差異並執行完整現行升級。下載失敗保留快取，不能宣稱清單已刷新。後端拒絕不在清單的自由文字；既有歷史院名保留。正式資料庫的實際清單版本取決於最後一次 SQL 升級所使用的快取。
 
-在既有升級完成後，於 SQL Editor 執行完整 `supabase/upgrade-student-activation.sql`，此檔須最後執行。若重跑舊的個人資料或動態題目升級檔，必須再跑此檔恢復啟用檢查。
+## 展示模式
 
-1. 管理員先建立梯次及姓名、Email、手機名冊。
-2. 學員選「首次啟用帳號」，填三項資料並收取 Email 驗證信。驗證信箱後才由資料庫核對名冊，不向匿名使用者透露名冊內容。
-3. 核對後顯示名冊基本資料，學員補齊護理年資、服務醫院、單位、報考科別、首次 OSCE 與生日，設定至少 8 字元密碼。Email 沿用名冊，如需修改由管理員處理。
-4. 完成啟用後，使用 Email 與密碼登入，僅看本人已公布成績。未完成者登入後繼續啟用流程，不會取得成績。既有學員也須首次完成此步驟。
-5. 忘記密碼透過已驗證 Email 收取重設連結；手機僅用於核對名冊，不再作為登入密碼。
+lib/demo.ts 的 DEMO_MODE 預設 false。可改為 true，在瀏覽器 localStorage 使用 teacher／demo1234 或 student／demo1234；只用於展示與離線測試，不存正式資料。展示模式遵守逐題公布、名冊鎖定、題目版本與建立重試等主要資料規則；不模擬真實 Auth 信箱確認、SMTP、系統管理者、封存或永久刪除。醫院名冊仍取自網站提供的本機快取資產。
 
-Supabase Auth 必須啟用 Email、確認信箱與可用 SMTP。Redirect URLs 除原本兩個頁面外，加入 `https://luckyseal0923.github.io/nptc/student/?reset=1`；本機測試亦加入對應的本機 student URL。密碼由 Supabase Auth 管理，前端及學員資料表不保存明文密碼。郵件連結失效可重新申請。
+## 相關檔案
 
-驗證指令：`node tests/student-activation.mjs`（使用上述 PGlite 測試依賴）。測試實際執行完整 SQL 升級鏈，涵蓋名冊不符、跨帳號、未啟用拒絕、資料完整性、逐題公布與重複升級。這不等於正式環境的寄信與登入驗證，部署後仍須用測試名冊實際完成一次啟用、登出、密碼登入及重設密碼。
+- docs/reviews/2026-10-07-project-review.md：本次修正前的檢視證據。
+- docs/reviews/2026-10-07-fixes.md：逐項修正結果與驗證邊界。
+- docs/reviews/2026-10-07-before-after.html：完整程式修改前／後對照。
+- backend-password-login.md：後臺登入設定與驗收。
 
-Auth API 依據：[重設密碼](https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail)、[更新密碼](https://supabase.com/docs/reference/javascript/auth-updateuser)。
+官方 API：[更新 Email／密碼](https://supabase.com/docs/reference/javascript/auth-updateuser)、[Edge 個別函式驗證設定](https://supabase.com/docs/guides/functions/function-configuration)。

@@ -1,6 +1,15 @@
 -- 在 upgrade-student-activation.sql 與 upgrade-dynamic-osce-stations.sql 之後執行。
 -- 僅回傳名冊對應帳號的註冊狀態，不回傳認證資料。可重複執行。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 create or replace function public.nptc_teacher_data(requested_workshop uuid default null) returns jsonb language plpgsql stable security definer set search_path='' as $$
 declare selected nptc_private.workshops; items jsonb; roster jsonb;
 begin

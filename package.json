@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "node scripts/sync-hospitals.mjs && vite build && node scripts/static-routes.mjs",
+    "build": "node scripts/sync-hospitals.mjs && node scripts/build-supabase.mjs && vite build && node scripts/static-routes.mjs",
+    "build:sql": "node scripts/build-supabase.mjs",
+    "typecheck": "tsc --noEmit --incremental false && tsc -p tsconfig.edge.json --noEmit",
+    "test": "node scripts/test.mjs",
+    "check": "pnpm typecheck && pnpm test",
     "start": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -21,6 +25,7 @@
     "tailwind-merge": "3.6.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

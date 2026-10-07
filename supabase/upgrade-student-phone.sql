@@ -1,5 +1,14 @@
 -- 在已執行 setup.sql 的專案中執行本檔，加入題目設定與批次匯入功能。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 
 -- 學員登入資訊改為姓名、Email、手機電話；既有身分證字號資料保留但不再顯示。
 alter table nptc_private.students add column if not exists phone text;

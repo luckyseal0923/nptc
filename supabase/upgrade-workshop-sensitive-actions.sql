@@ -1,5 +1,14 @@
 -- 在 upgrade-admin-roles.sql 後執行。封存與永久刪除須使用剛以密碼登入的新 session。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 
 create table if not exists nptc_private.workshop_action_sessions (
  session_id text primary key,

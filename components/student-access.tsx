@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { HospitalPicker, type Hospital } from '@/app/student/student-dashboard';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
 
 type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
 export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
@@ -69,7 +69,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
   const [hospitals, setHospitals] = useState<Hospital[]>([]), [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`${import.meta.env.BASE_URL}data/accredited-hospitals.json`, { signal: controller.signal }).then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(data => setHospitals(data.hospitals ?? [])).catch(e => { if (e.name !== 'AbortError') setError('醫院名冊無法載入，請重新整理後再試。'); }).finally(() => setLoading(false));
+    rpc<{hospitals:Hospital[]}>('nptc_hospital_directory',{},controller.signal).then(data=>setHospitals(data.hospitals)).catch(e=>{if(e.name!=='AbortError')setError('醫院名冊無法載入，請重新整理後再試。');}).finally(()=>setLoading(false));
     return () => controller.abort();
   }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -89,7 +89,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }
   const student = state.student;
-  return <section className="mx-auto max-w-3xl px-6 py-12"><h1 className="text-2xl font-bold">完成首次啟用</h1><p className="my-4">{state.stage === 'unclaimed' ? 'Email 已驗證，請核對報名姓名與手機。' : '名冊已核對，請補齊個人資料並設定日後登入密碼。'}</p>
+  return <section className="mx-auto max-w-3xl px-6 py-12"><h1 className="text-2xl font-bold">完成首次啟用</h1><p className="my-4">{state.stage === 'unclaimed' ? '已登入，請核對報名姓名與手機。' : '名冊已核對，請補齊個人資料並設定日後登入密碼。'}</p>
     <form onSubmit={submit} className="space-y-5 rounded-xl border bg-white p-6" key={state.stage}>
       <label className="block">Email（登入帳號）<Input className="mt-2 h-12 px-3 md:text-base" value={email} readOnly /></label>
       {state.stage === 'unclaimed' ? <><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" defaultValue={sessionStorage.getItem('nptc-activation-name') ?? ''} required /></label><label className="block">手機電話<Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" pattern="09[0-9]{8}" defaultValue={sessionStorage.getItem('nptc-activation-phone') ?? ''} required /></label></> : <>

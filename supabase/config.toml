@@ -1,0 +1,3 @@
+[functions.student-activate]
+# 首次啟用的使用者尚未登入；函式內以服務端 RPC 核對名冊並限制嘗試次數。
+verify_jwt = false

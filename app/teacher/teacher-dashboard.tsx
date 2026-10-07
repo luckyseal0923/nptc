@@ -6,7 +6,7 @@ import { RosterStudentName } from '@/components/roster-student';
 import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
 import { rpc } from '@/lib/supabase';
 import { retryingRequest } from '@/lib/retrying-request';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from '@/components/link';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,9 @@ import { formatScore, maskPhone, validateGrade, workshopStations, type Student, 
 type Data = { workshops: Workshop[]; selected: Workshop | null; students: Student[]; thresholds: Threshold[] };
 
 export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops = false }: { onWorkshopChange?: (id: string) => void; canManageWorkshops?: boolean } = {}) {
+  const loadedWorkshop = useRef<string | undefined>(undefined);
+  const createRequest = useRef(crypto.randomUUID());
+  const [reloadTarget, setReloadTarget] = useState<{ id?: string } | null>(null);
   const [data, setData] = useState<Data | null>(null);
   useEffect(() => { if (data?.selected?.id) onWorkshopChange?.(data.selected.id); }, [data?.selected?.id, onWorkshopChange]);
   const [rosterSort, setRosterSort] = useState<RosterSort>('original');
@@ -37,7 +40,8 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
   const editableStations = stationDrafts ?? stations;
   const publishedStationKeys = new Set(data?.selected?.publishedStations ?? (data?.selected?.published ? stations.map((station) => station.key) : []));
   const selectedStation = stations.find((station) => station.key === scoreStation) ?? stations[0];
-  const selectedThreshold = data?.thresholds.find((item) => item.key === scoreStation);
+  const selectedThreshold = data?.thresholds.find((item) => item.key === selectedStation.key);
+  const rosterLocked = publishedStationKeys.size > 0;
 
   async function load(id?: string, signal?: AbortSignal) {
     setLoadingNotice('');
@@ -45,6 +49,13 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
       requestSignal => rpc<Data>('nptc_teacher_data', { requested_workshop: id || null }, requestSignal),
       { signal, onRetry: () => setLoadingNotice('第一次請求逾時，正在重新連線…') },
     );
+    const nextStations = workshopStations(result.selected);
+    const changed = loadedWorkshop.current !== result.selected?.id;
+    setScoreStation(current => !changed && nextStations.some(station => station.key === current) ? current : nextStations[0].key);
+    setSelectedStudentIds(new Set());
+    if (changed) setShowArchive(false);
+    loadedWorkshop.current = result.selected?.id;
+    setReloadTarget(null);
     setData(result);
     setError('');
     setLoadingNotice('');
@@ -61,18 +72,29 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
     setBusy(true); setError(''); setMessage('');
     try { await load(id); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
   }
+  async function reloadAfterSave(id?: string) {
+    try { await load(id); } catch (cause) {
+      setReloadTarget({ id });
+      setError('資料已儲存，但畫面尚未更新：' + (cause as Error).message);
+    }
+  }
   async function save(payload: Record<string, unknown>, success: string) {
+    if (reloadTarget) { setError('上一筆資料已儲存，請先重新讀取確認結果。'); return false; }
     setBusy(true); setError(''); setMessage('');
     try {
-      const body = { ...payload, workshopId: data?.selected?.id };
+      const body = { ...payload, workshopId: data?.selected?.id,
+        ...(payload.action === 'saveStations' ? { stationsRevision: data?.selected?.stations_revision ?? 0 } : {}),
+        ...(payload.action === 'createWorkshop' ? { requestId: createRequest.current } : {}) };
       const rpcName = payload.action === 'saveStations' ? 'nptc_teacher_save_stations_v3' : payload.action === 'publishStation' ? 'nptc_teacher_publish_station' : 'nptc_teacher_write';
       const result = await rpc<{ id?: string }>(rpcName, { body });
-      await load(result.id ?? data?.selected?.id);
+      if (payload.action === 'createWorkshop') createRequest.current = crypto.randomUUID();
       setMessage(success);
+      await reloadAfterSave(result.id ?? data?.selected?.id);
       return true;
     } catch (cause) { setError((cause as Error).message); return false; } finally { setBusy(false); }
   }
   async function saveScoreBatch(form: HTMLFormElement) {
+    if (reloadTarget) { setError('上一筆資料已儲存，請先重新讀取確認結果。'); return; }
     const currentData = data;
     if (!currentData?.selected) return;
     if (!selectedStudentIds.size) { setError('請至少勾選一位要儲存的學員。'); return; }
@@ -86,9 +108,9 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
       }));
       setBusy(true); setError(''); setMessage('');
       await rpc('nptc_teacher_batch_scores_v3', { body: { workshopId: currentData.selected.id, station: selectedStation.key, items } });
-      await load(currentData.selected.id);
       setSelectedStudentIds(new Set());
       setMessage(`已儲存 ${items.length} 位學員的${selectedStation.title}成績與回饋。`);
+      await reloadAfterSave(currentData.selected.id);
     } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
   }
   async function deleteStudent(student: Student) {
@@ -100,12 +122,12 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
   }
 
   if (!data) return <section className="portal-panel"><p role="status">{error ? '課程資料載入失敗' : loadingNotice || '正在載入教學評量資料…'}</p>{error && <><p role="alert" className="notice error">{error}</p><Button type="button" disabled={busy} className="action" onClick={() => changeWorkshop('')}>{busy ? '載入中…' : '重新載入'}</Button></>}</section>;
-  if (!data.selected) return <section className="empty-panel"><h2>先建立第一個工作坊梯次</h2><p>每個梯次會各自管理名冊、題目、成績與邊緣及格分數。</p><form className="entry-form" onSubmit={async event => {
+  if (!data.selected) return <section className="empty-panel"><h2>先建立第一個工作坊梯次</h2><p>每個梯次會各自管理名冊、題目、成績與邊緣及格分數。</p>{message && <p role="status" className="notice success">{message}</p>}{reloadTarget && <Button disabled={busy} onClick={() => changeWorkshop(reloadTarget.id ?? '')}>已建立，重新讀取</Button>}<form className="entry-form" onSubmit={async event => {
     event.preventDefault();
     const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
     if (!name) { setError('請填寫梯次名稱。'); return; }
     await save({ action: 'createWorkshop', name }, '新梯次已建立。');
-  }}><label>梯次名稱<Input name="name" required maxLength={100} placeholder="例如：2026 國考班" /></label>{error && <p role="alert">{error}</p>}<Button type="submit" disabled={busy}>{busy ? '建立中…' : '建立第一個梯次'}</Button></form></section>;
+  }}><label>梯次名稱<Input name="name" required maxLength={100} placeholder="例如：2026 國考班" /></label>{error && <p role="alert">{error}</p>}<Button type="submit" disabled={busy || !!reloadTarget}>{busy ? '建立中…' : '建立第一個梯次'}</Button></form></section>;
 
   return <>
     <header className="teacher-heading">
@@ -114,6 +136,7 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
     </header>
     {error && <div role="alert" className="notice error">{error}</div>}
     {message && <div role="status" className="notice success">{message}</div>}
+    {reloadTarget && <Button className="action secondary" disabled={busy} onClick={() => changeWorkshop(reloadTarget.id ?? '')}>已儲存，重新讀取</Button>}
 
     <section className="workshop-control-card">
       <div className="workshop-control-copy"><span className="section-label">CURRENT WORKSHOP</span><h2>{data.selected.name}</h2><p>此梯次的名冊、OSCE 題目、成績與公告皆獨立管理。</p></div>
@@ -122,14 +145,14 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
           {data.workshops.map((workshop) => <NativeSelectOption key={workshop.id} value={workshop.id}>{workshop.name}</NativeSelectOption>)}
         </NativeSelect>
       </label>
-      <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>{stations.length}</b> 個 OSCE 題目</span><span className={data.selected.published ? 'published' : ''}>{data.selected.published ? '成績已公告' : '成績未公告'}</span></div>
+      <div className="workshop-summary"><span><b>{data.students.length}</b> 位學員</span><span><b>{stations.length}</b> 個 OSCE 題目</span><span className={rosterLocked ? 'published' : ''}>{publishedStationKeys.size === 0 ? '成績未公告' : publishedStationKeys.size === stations.length ? '全部題目已公告' : `已公告 ${publishedStationKeys.size} / ${stations.length} 題`}</span></div>
       <Button className="action create-workshop-button" disabled={busy} onClick={() => setShowCreate((value) => !value)}>{showCreate ? '取消新增' : '＋ 建立新梯次'}</Button>
       {canManageWorkshops && <Button className="action secondary" disabled={busy} onClick={() => setShowArchive(value => !value)}>{showArchive ? '取消封存' : '封存此梯次'}</Button>}
     </section>
     {showArchive && canManageWorkshops && <section className="create-workshop-card"><ConfirmWorkshopAction key={data.selected.id} action="archive" workshop={data.selected} onCancel={() => setShowArchive(false)} onSuccess={async () => {
       const name = data.selected!.name;
       setShowArchive(false);
-      await load();
+      await reloadAfterSave();
       setMessage(`「${name}」已封存。`);
     }}/></section>}
     {showCreate && <form className="create-workshop-card" onSubmit={async (event) => {
@@ -147,6 +170,7 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
 
       <TabsContent value="roster">
         <section className="workflow-intro"><strong>第一步：建立本梯次名冊</strong><span>可逐筆新增，或直接從 Excel 貼上姓名、Email、手機電話。</span></section>
+        {rosterLocked && <p className="notice">已有題目公布，名冊已鎖定；請先撤回本梯次所有題目公告再修改，以維持公布成績與及格門檻。</p>}
         <div className="roster-entry-grid">
         <section className="data-panel import-panel">
           <div className="panel-heading"><div><h2>批次匯入學員</h2><p className="form-help">欄位順序：姓名、Email、手機電話。第一列欄名可保留。</p></div></div>
@@ -156,17 +180,17 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
             if (rows[0]?.[0]?.match(/姓名|name/i)) rows.shift();
             if (!rows.length || rows.some((row) => row.length < 3)) { setError('請貼上每列皆含姓名、Email、手機電話的資料。'); return; }
             if (await save({ action: 'bulkImportStudents', students: rows.map(([name, email, phone]) => ({ name, email, phone })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
-          }}><fieldset disabled={busy || !!data.selected.published}><textarea name="rows" placeholder={'姓名\tEmail\t手機電話\n王小明\tstudent@example.com\t0912345678'} /><Button className="action" type="submit">批次匯入名冊</Button></fieldset></form>
+          }}><fieldset disabled={busy || rosterLocked}><textarea name="rows" placeholder={'姓名\tEmail\t手機電話\n王小明\tstudent@example.com\t0912345678'} /><Button className="action" type="submit">批次匯入名冊</Button></fieldset></form>
         </section>
           <section className="data-panel"><h2>{editing ? '編輯學員' : '新增學員'}</h2><p className="form-help">Email 與手機電話會作為學員登入與聯絡資訊。</p>
             <form key={editing?.id ?? 'new'} className="entry-form" onSubmit={async (event) => {
               event.preventDefault(); const form = event.currentTarget; const fields = new FormData(form);
               if (await save({ action: 'saveStudent', id: editing?.id, revision: editing?.revision, name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone') }, '學員資料已儲存。')) form.reset();
-            }}><fieldset disabled={busy || !!data.selected.published}><label>姓名<Input name="name" defaultValue={editing?.name ?? ''} required maxLength={100} /></label><label>登入 Email<Input name="email" type="email" defaultValue={editing?.email ?? ''} required maxLength={254} /></label><label>手機電話<Input name="phone" type="tel" defaultValue={editing?.phone ?? ''} required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button>{editing && <Button className="action secondary" type="button" onClick={() => setEditing(null)}>取消</Button>}</div></fieldset></form>
+            }}><fieldset disabled={busy || rosterLocked}><label>姓名<Input name="name" defaultValue={editing?.name ?? ''} required maxLength={100} /></label><label>登入 Email<Input name="email" type="email" readOnly={!!editing?.account_registered} defaultValue={editing?.email ?? ''} required maxLength={254} /></label>{!!editing?.account_registered && <p className="form-help">已建立帳號的 Email 請由學員專區變更並完成信箱確認，系統會同步歷次名冊。</p>}<label>手機電話<Input name="phone" type="tel" defaultValue={editing?.phone ?? ''} required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button>{editing && <Button className="action secondary" type="button" onClick={() => setEditing(null)}>取消</Button>}</div></fieldset></form>
           </section>
         </div>
         <section className="data-panel roster-current"><div className="panel-heading"><div><span className="section-label">CURRENT ROSTER</span><h2>目前學員名冊</h2></div><div className="flex items-center gap-3"><span>{data.students.length} 位學員</span><Button className="action small secondary" disabled={busy} onClick={() => changeWorkshop(data.selected!.id)}>重新整理</Button></div></div>
-          {data.students.length ? <Table><TableHeader><TableRow><TableHead aria-sort={rosterSort === 'stroke-asc' ? 'ascending' : rosterSort === 'stroke-desc' ? 'descending' : 'none'}><RosterSortSelect value={rosterSort} onChange={setRosterSort} /></TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{sortedRoster.map((student) => <TableRow key={student.id}><TableCell><RosterStudentName student={student} /></TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || !!data.selected!.published} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || !!data.selected!.published} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
+          {data.students.length ? <Table><TableHeader><TableRow><TableHead aria-sort={rosterSort === 'stroke-asc' ? 'ascending' : rosterSort === 'stroke-desc' ? 'descending' : 'none'}><RosterSortSelect value={rosterSort} onChange={setRosterSort} /></TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{sortedRoster.map((student) => <TableRow key={student.id}><TableCell><RosterStudentName student={student} /></TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || rosterLocked} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || rosterLocked} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
         </section>
       </TabsContent>
 
@@ -175,21 +199,21 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
         <section className="data-panel"><form key={`${data.selected.id}:${JSON.stringify(stations)}`} onSubmit={(event) => {
           event.preventDefault(); const fields = new FormData(event.currentTarget);
           try {
-          const configured = editableStations.map((station): StationDefinition => ({ ...station, title: String(fields.get(`${station.key}_title`) ?? '').trim(), testDate: String(fields.get(`${station.key}_testDate`) ?? ''), complaint: String(fields.get(`${station.key}_complaint`) ?? '').trim(), diagnosis: String(fields.get(`${station.key}_diagnosis`) ?? '').trim(), prompt: String(fields.get(`${station.key}_prompt`) ?? '').trim(), ...(() => { const domainMax=domainFormValues(fields,`${station.key}_max`); if (!domainMax && stations.some(s=>s.key===station.key && s.title.trim() && !s.domainMax)) return {}; return {domainMax:validateDomainMax(domainMax)}; })() }));
+          const configured = editableStations.map((station): StationDefinition => publishedStationKeys.has(station.key) ? { ...station } : ({ ...station, title: String(fields.get(`${station.key}_title`) ?? '').trim(), testDate: String(fields.get(`${station.key}_testDate`) ?? ''), complaint: String(fields.get(`${station.key}_complaint`) ?? '').trim(), diagnosis: String(fields.get(`${station.key}_diagnosis`) ?? '').trim(), prompt: String(fields.get(`${station.key}_prompt`) ?? '').trim(), ...(() => { const domainMax=domainFormValues(fields,`${station.key}_max`); if (!domainMax && stations.some(s=>s.key===station.key && s.title.trim() && !s.domainMax)) return {}; return {domainMax:validateDomainMax(domainMax)}; })() }));
           save({ action: 'saveStations', stations: configured }, 'OSCE 題目設定已儲存。');
           } catch(cause) { setError((cause as Error).message); }
-        }}><fieldset disabled={busy || !!data.selected.published}><div className="station-settings-grid station-settings-all">{editableStations.map((station, index) => <article className="station-setting" key={station.key}><span>OSCE 第 {index + 1} 題</span><label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /></label><label>測驗日期<Input name={`${station.key}_testDate`} type="date" defaultValue={station.testDate} required /></label><label>個案主訴<Input name={`${station.key}_complaint`} defaultValue={station.complaint} required maxLength={300} placeholder="例如：胸痛、呼吸困難" /></label><label>最終診斷<Input name={`${station.key}_diagnosis`} defaultValue={station.diagnosis} required maxLength={300} placeholder="例如：急性心肌梗塞" /></label><label>命題內容摘要<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} required maxLength={2000} placeholder="簡述任務、情境與評分重點" /></label><DomainMaxFields stationKey={station.key} maximum={station.domainMax}/></article>)}</div><div className="form-actions"><Button type="button" className="action secondary" onClick={() => setStationDrafts([...editableStations, { key: `station_${crypto.randomUUID()}`, title: '', testDate: '', complaint: '', diagnosis: '', prompt: '' }])}>＋ 新增題目</Button><Button type="submit" className="action">儲存題目設定</Button></div></fieldset></form></section>
+        }}><fieldset disabled={busy}><div className="station-settings-grid station-settings-all">{editableStations.map((station, index) => <article className="station-setting" key={station.key}><fieldset disabled={publishedStationKeys.has(station.key)}><span>OSCE 第 {index + 1} 題</span><label>題目名稱<Input name={`${station.key}_title`} defaultValue={station.title} required maxLength={100} placeholder="請輸入題目名稱" /></label><label>測驗日期<Input name={`${station.key}_testDate`} type="date" defaultValue={station.testDate} required /></label><label>個案主訴<Input name={`${station.key}_complaint`} defaultValue={station.complaint} required maxLength={300} placeholder="例如：胸痛、呼吸困難" /></label><label>最終診斷<Input name={`${station.key}_diagnosis`} defaultValue={station.diagnosis} required maxLength={300} placeholder="例如：急性心肌梗塞" /></label><label>命題內容摘要<textarea name={`${station.key}_prompt`} defaultValue={station.prompt} required maxLength={2000} placeholder="簡述任務、情境與評分重點" /></label><DomainMaxFields stationKey={station.key} maximum={station.domainMax}/>{publishedStationKeys.has(station.key) && <p className="form-help">本題已公告，請先撤回公告再編輯。</p>}</fieldset></article>)}</div><div className="form-actions"><Button type="button" className="action secondary" onClick={() => setStationDrafts([...editableStations, { key: `station_${crypto.randomUUID()}`, title: '', testDate: '', complaint: '', diagnosis: '', prompt: '' }])}>＋ 新增題目</Button><Button type="submit" className="action">儲存題目設定</Button></div></fieldset></form></section>
       </TabsContent>
 
       <TabsContent value="scores">
         <section className="workflow-intro"><strong>第三步：選擇一站，再登錄該站成績</strong><span>每題以邊緣及格分數判定及格，取該題 Global Rating＝3 的平均；無資料時尚無法判定。</span></section>
         <div className="station-picker">{stations.map((station) => {
           const threshold = data.thresholds.find((item) => item.key === station.key);
-          return <button type="button" key={station.key} className={station.key === scoreStation ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}><span>{station.testDate || '尚未設定測驗日期'}</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
+          return <button type="button" key={station.key} disabled={busy} className={station.key === selectedStation.key ? 'station-card active' : 'station-card'} onClick={() => { setScoreStation(station.key); setEditing(null); setSelectedStudentIds(new Set()); }}><span>{station.testDate || '尚未設定測驗日期'}</span><strong>{station.title}</strong><small>邊緣及格：{formatScore(threshold?.value ?? null)} 分</small></button>;
         })}</div>
         <section className="data-panel score-station-panel"><div className="panel-heading"><div><span className="section-label">{selectedStation.testDate || '測驗日期未設定'}</span><h2>{selectedStation.title}</h2><p className="form-help">{selectedStation.complaint && `主訴：${selectedStation.complaint}　`}{selectedStation.diagnosis && `最終診斷：${selectedStation.diagnosis}`}<br />{selectedStation.prompt || '尚未填寫命題內容摘要。'}</p></div><div className="threshold-chip">Rating＝3 平均<br /><strong>{formatScore(selectedThreshold?.value ?? null)} 分</strong></div></div>
           {!selectedStation.domainMax && <p className="notice">本題尚未設定五面向滿分，請先在「新增 OSCE 題目」完成配分，才能登錄分項成績。</p>}
-          {data.students.length ? <form noValidate className="score-batch-form score-card-form" key={`${data.selected.id}:${selectedStation.key}:${data.students.map(s=>s.revision).join(',')}`} onSubmit={(event) => { event.preventDefault(); saveScoreBatch(event.currentTarget); }}><fieldset disabled={busy || !!data.selected!.published || publishedStationKeys.has(selectedStation.key) || !selectedStation.domainMax}><div className="score-entry-list">{data.students.map((student) => <article className={`score-entry-card${selectedStudentIds.has(student.id) ? ' selected' : ''}`} key={student.id}><div className="score-entry-heading"><label className="score-entry-select"><input type="checkbox" aria-label={`選取 ${student.name}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); event.target.checked ? next.add(student.id) : next.delete(student.id); return next; })} /><span><strong>{student.name}</strong><small>手機 {maskPhone(student.phone)}</small></span></label><label className="score-rating"><span>Global Rating</span><NativeSelect name={`${student.id}_rating`} defaultValue={String(student[`${selectedStation.key}_rating`] ?? '')}><NativeSelectOption value="">未評分</NativeSelectOption>{[1, 2, 3, 4, 5].map((number) => <NativeSelectOption key={number} value={number}>{number}</NativeSelectOption>)}</NativeSelect></label></div><DomainGradeFields studentId={student.id} studentName={student.name} stationKey={selectedStation.key} scores={student[`${selectedStation.key}_domains`]} maximum={selectedStation.domainMax} legacyScore={student[`${selectedStation.key}_score`]}/><label className="score-feedback"><span>質性回饋</span><textarea name={`${student.id}_feedback`} maxLength={500} defaultValue={String(student[`${selectedStation.key}_feedback`] ?? '')} placeholder="簡短回饋（最多 500 字）" /></label></article>)}</div><div className="batch-save-bar"><span>已選取 <strong>{selectedStudentIds.size}</strong> 位學員；只會儲存勾選的資料。</span><Button type="submit" className="action">批次儲存已勾選成績</Button></div></fieldset></form> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
+          {data.students.length ? <form noValidate className="score-batch-form score-card-form" key={`${data.selected.id}:${selectedStation.key}:${data.students.map(s=>s.revision).join(',')}`} onSubmit={(event) => { event.preventDefault(); saveScoreBatch(event.currentTarget); }}><fieldset disabled={busy || publishedStationKeys.has(selectedStation.key) || !selectedStation.domainMax}><div className="score-entry-list">{data.students.map((student) => <article className={`score-entry-card${selectedStudentIds.has(student.id) ? ' selected' : ''}`} key={student.id}><div className="score-entry-heading"><label className="score-entry-select"><input type="checkbox" aria-label={`選取 ${student.name}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); event.target.checked ? next.add(student.id) : next.delete(student.id); return next; })} /><span><strong>{student.name}</strong><small>手機 {maskPhone(student.phone)}</small></span></label><label className="score-rating"><span>Global Rating</span><NativeSelect name={`${student.id}_rating`} defaultValue={String(student[`${selectedStation.key}_rating`] ?? '')}><NativeSelectOption value="">未評分</NativeSelectOption>{[1, 2, 3, 4, 5].map((number) => <NativeSelectOption key={number} value={number}>{number}</NativeSelectOption>)}</NativeSelect></label></div><DomainGradeFields studentId={student.id} studentName={student.name} stationKey={selectedStation.key} scores={student[`${selectedStation.key}_domains`]} maximum={selectedStation.domainMax} legacyScore={student[`${selectedStation.key}_score`]}/><label className="score-feedback"><span>質性回饋</span><textarea name={`${student.id}_feedback`} maxLength={500} defaultValue={String(student[`${selectedStation.key}_feedback`] ?? '')} placeholder="簡短回饋（最多 500 字）" /></label></article>)}</div><div className="batch-save-bar"><span>已選取 <strong>{selectedStudentIds.size}</strong> 位學員；只會儲存勾選的資料。</span><Button type="submit" className="action">批次儲存已勾選成績</Button></div></fieldset></form> : <p className="empty-inline">請先在「學員名冊」新增學員。</p>}
         </section>
       </TabsContent>
 

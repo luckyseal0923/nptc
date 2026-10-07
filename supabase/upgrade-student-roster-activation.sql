@@ -1,5 +1,14 @@
 -- 首次啟用改為名冊核對；只允許伺服器呼叫，不覆寫既有帳號。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 create table if not exists nptc_private.activation_attempts (
  email_hash text primary key, attempts integer not null, started_at timestamptz not null
 );
@@ -29,7 +38,9 @@ begin
 end; $$;
 revoke all on function public.nptc_verify_student_roster(jsonb) from public,anon,authenticated;
 grant execute on function public.nptc_verify_student_roster(jsonb) to service_role;
-revoke all on function public.nptc_issue_student_invitation(uuid) from public,anon,authenticated;
-revoke all on function public.nptc_consume_student_invitation(jsonb) from public,anon,authenticated,service_role;
+do $$ begin
+ if to_regprocedure('public.nptc_issue_student_invitation(uuid)') is not null then execute 'revoke all on function public.nptc_issue_student_invitation(uuid) from public,anon,authenticated'; end if;
+ if to_regprocedure('public.nptc_consume_student_invitation(jsonb)') is not null then execute 'revoke all on function public.nptc_consume_student_invitation(jsonb) from public,anon,authenticated,service_role'; end if;
+end;$$;
 notify pgrst,'reload schema';
 commit;

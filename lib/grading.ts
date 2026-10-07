@@ -6,7 +6,7 @@ export const DEFAULT_STATIONS:StationDefinition[]=[
 export const STATIONS=DEFAULT_STATIONS;
 export type Grade={score:number|null;rating:number|null;domains?:DomainValues|null};
 export type Student={id:string;workshop_id:string;name:string;email:string;phone:string;revision:number;updated_at:string;[key:string]:unknown};
-export type Workshop={id:string;name:string;published:number;publishedStations?:string[];created_at:string;stations?:StationDefinition[]};
+export type Workshop={id:string;name:string;published:number;publishedStations?:string[];created_at:string;stations?:StationDefinition[];stations_revision?:number;archived_at?:string|null};
 export type Threshold={key:string;value:number|null;count:number};
 export function gradeStatus(score:number|null,threshold:number|null){return score===null?'尚未登錄':threshold===null?'尚無法判定':score>=threshold?'及格':'未達及格';}
 export function computeThreshold(grades:Grade[]):{value:number|null;count:number}{const eligible=grades.filter(g=>g.rating===3&&g.score!==null);return {value:eligible.length?eligible.reduce((sum,g)=>sum+g.score!,0)/eligible.length:null,count:eligible.length};}

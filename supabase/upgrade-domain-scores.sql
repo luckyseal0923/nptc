@@ -1,6 +1,15 @@
 -- 前置：dynamic-osce-stations、student-activation、roster-account-status 已完成。
 -- 不改寫既有總分，不推算五面向分數。請整份執行，可重複執行。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 do $$ begin
  if to_regprocedure('nptc_private.student_data_before_activation()') is null then raise exception '請先完成 student-activation 升級。'; end if;
 end;$$;

@@ -1,8 +1,8 @@
 import type { DomainValues } from './domains';
 export type AnalysisStudent = { id: string; name: string; email: string; workshop_id: string; [key: string]: unknown };
 export type AnalysisStation = { key: string; title: string; testDate?: string; domainMax?: DomainValues };
-export type AnalysisWorkshop = { id: string; name: string; created_at: string; stations?: AnalysisStation[] };
-export type AnalysisData = { workshops: AnalysisWorkshop[]; selected: AnalysisWorkshop | null; students: AnalysisStudent[]; thresholds: { key: string; value: number | null; count: number }[] };
+export type AnalysisWorkshop = { id: string; name: string; created_at: string; archived_at?: string | null; stations?: AnalysisStation[] };
+export type AnalysisData = { includesArchived?: boolean; workshops: AnalysisWorkshop[]; selected: AnalysisWorkshop | null; students: AnalysisStudent[]; thresholds: { key: string; value: number | null; count: number }[] };
 export type Enrollment = { student: AnalysisStudent; workshop: AnalysisWorkshop; exams: Exam[]; identity: string };
 export type Exam = { key: string; title: string; date: string; workshopId: string; workshopName: string; score: number | null; rating: number | null; threshold: number | null; feedback: string; domains?: unknown; domainMax?: DomainValues };
 export type Dimension = 'hospital' | 'unit' | 'exam_specialty' | 'nursing_years' | 'first_osce';

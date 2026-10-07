@@ -1,6 +1,6 @@
 # 後臺 Email／密碼登入
 
-本次沿用 Supabase Auth 與既有帳號審核 RPC，不需新增 SQL table 或重新執行 SQL。
+後臺使用 Supabase Auth 的 Email／密碼登入及帳號審核 RPC。前後端一致性修正版本 2026100701 需要執行 supabase/upgrade-project-consistency.sql；完整安裝與部署順序以 README.md 為準。
 
 - 新申請：姓名、Email、密碼（至少 8 字元）、確認密碼、用途。首次信箱驗證返回網站後，送出待審核申請。
 - 已啟用：直接用 Email＋密碼登入。
@@ -15,7 +15,7 @@
 https://nptc-ai.zeabur.app/teacher/?reset=1
 
 同時保留 https://nptc-ai.zeabur.app/teacher/ 。修改後重新啟動 auth。
-不要為了省略後臺首次驗證而全域開啟自動確認，因為學員名冊核對也依賴信箱身分。
+不要為了省略後臺首次驗證而全域開啟自動確認。學員首次啟用由 student-activate 核對名冊後建立帳號；後臺申請仍須實際確認信箱，Email 變更也需完成確認。
 
 ## 驗收
 

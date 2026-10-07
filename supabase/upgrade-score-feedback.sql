@@ -1,5 +1,14 @@
 -- 在已執行 setup.sql 與 upgrade-workshop-management.sql 的專案中執行本檔。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 
 alter table nptc_private.students
   add column if not exists q1_feedback text not null default '' check(length(q1_feedback)<=500),

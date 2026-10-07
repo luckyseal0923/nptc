@@ -27,7 +27,7 @@ function toDirectory(rows) {
 
 async function loadRows() {
   if (sourceFile) return JSON.parse(await readFile(sourceFile, 'utf8'));
-  const response = await fetch(sourceUrl, { headers: { accept: 'application/json' } });
+  const response = await fetch(sourceUrl, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`官方資料下載失敗（HTTP ${response.status}）`);
   return response.json();
 }

@@ -1,5 +1,14 @@
 -- 在 Supabase SQL Editor 執行整份檔案；不會搬移或刪除舊 D1 資料。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 create schema if not exists nptc_private;
 revoke all on schema nptc_private from public,anon,authenticated;
 create table if not exists nptc_private.teachers(email text primary key check(email=lower(trim(email))));

@@ -1,5 +1,14 @@
 -- 在 upgrade-backend-accounts.sql 之後執行。系統管理者沿用既有 account_reviewers 名單。
 begin;
+-- BEGIN LEGACY VERSION GUARD
+do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026100701) then
+   raise exception '已安裝新版資料庫，請使用 upgrade-project-consistency.sql；不可重跑舊版升級檔。';
+  end if;
+ end if;
+end;$$;
+-- END LEGACY VERSION GUARD
 
 -- 既有審核員即為系統管理者；初始帳號保留為不可降權的根管理者。
 create or replace function public.nptc_backend_accounts() returns jsonb
