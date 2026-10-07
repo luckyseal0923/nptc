@@ -28,7 +28,7 @@ language sql stable security definer set search_path='' as $$select nptc_private
 revoke all on function nptc_private.teacher_data(uuid,boolean) from public,anon,authenticated;
 revoke all on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) from public,anon;
 grant execute on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) to authenticated;`;
-const onboarding = extract('upgrade-student-activation','public.nptc_student_onboarding_status').replace(
+const onboarding = extract('upgrade-student-activation','public.nptc_student_onboarding_status').replace("'nursingYears',s.nursing_years","'serviceKind',s.service_kind,'nursingYears',s.nursing_years").replace(
   'select * into s from nptc_private.students where email=e order by updated_at desc nulls last,id limit 1;',
   'select student.* into s from nptc_private.students student join nptc_private.workshops w on w.id=student.workshop_id where student.email=e order by (w.archived_at is null) desc,student.updated_at desc nulls last,student.id limit 1;');
 let verifyRoster = extract('upgrade-student-roster-activation','public.nptc_verify_student_roster').replace(
@@ -44,12 +44,12 @@ verifyRoster = verifyRoster.replace(" if exists(select 1 from auth.users u where
   ) then 'already_activated' else 'account_exists' end);
  end if;
  if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then`);
-const studentRead = extract('upgrade-domain-scores','nptc_private.student_data_before_activation').replace(
+const studentRead = extract('upgrade-domain-scores','nptc_private.student_data_before_activation').replace("'profile',jsonb_build_object('nursingYears'", "'profile',jsonb_build_object('serviceKind',s.service_kind,'nursingYears'").replace(
   "'workshopName',w.name,'published'", "'workshopName',w.name,'archived',w.archived_at is not null,'published'");
 const current = [teacherRead,readWrappers,onboarding,
   extract('upgrade-student-activation','public.nptc_claim_student'),
   extract('upgrade-student-activation','public.nptc_student_data'),
-  extract('upgrade-student-activation','public.nptc_finish_student_activation'),
+  extract('upgrade-student-activation','public.nptc_finish_student_activation').replace(' and length(trim(unit))>0',''),
   studentRead,
   extract('upgrade-domain-scores','public.nptc_teacher_batch_scores_v3'),
   `create or replace function public.nptc_teacher_batch_scores_v2(body jsonb) returns jsonb language sql security definer set search_path='' as $$select public.nptc_teacher_batch_scores_v3(body)$$;`,

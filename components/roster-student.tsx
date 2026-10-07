@@ -14,7 +14,7 @@ export function RosterStudentName({ student }: { student: RosterRecord }) {
     ['Email', student.email],
     ['手機電話', student.phone],
     ['護理年資', student.nursing_years == null ? null : `${student.nursing_years} 年`],
-    ['服務醫院', student.hospital],
+    ['服務狀態／機構', student.hospital],
     ['服務單位', student.unit],
     ['報考科別', student.exam_specialty],
     ['首次報考國家 OSCE', student.first_osce === true ? '是' : student.first_osce === false ? '否' : null],

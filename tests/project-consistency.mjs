@@ -119,6 +119,19 @@ await test('current installation and populated upgrade preserve permissions and 
    const onboarding=await call('nptc_student_onboarding_status');assert.equal(onboarding.student.hospital,hospital);assert.equal(onboarding.student.firstOsce,false);assert.equal(onboarding.student.nursingYears,0);
    await owner();assert.equal((await db.query('select hospital from nptc_private.students where id=$1',[oldSid])).rows[0].hospital,null);
   });
+  await t.test('unemployed and custom institutions save and finish activation without a unit',async()=>{
+   await asUser(student,'student@example.test');
+   for (const [serviceKind,hospital] of [['unemployed','目前待業中'],['custom_medical','測試小型診所'],['non_medical','測試學校']]) {
+    await call('nptc_student_update_profile',{...profile,serviceKind,hospital,unit:''});
+    await call('nptc_finish_student_activation');
+    const state=await call('nptc_student_onboarding_status');
+    assert.equal(state.stage,'active');assert.equal(state.student.serviceKind,serviceKind);assert.equal(state.student.hospital,hospital);assert.equal(state.student.unit,'');
+   }
+   await assert.rejects(()=>call('nptc_student_update_profile',{...profile,serviceKind:'non_medical',hospital:'  '}));
+   await assert.rejects(()=>call('nptc_student_update_profile',{...profile,serviceKind:'unknown'}));
+   await assert.rejects(()=>call('nptc_student_update_profile',{...profile,serviceKind:'unemployed',hospital:'目前待業中',unit:'病房'}));
+   await call('nptc_student_update_profile',profile);
+  });
   await t.test('confirmed Auth email synchronizes active and archived history atomically',async()=>{
    const before=await snapshot();
    await db.query('update auth.users set email=$1 where id=$2',['changed@example.test',student]);

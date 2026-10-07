@@ -1566,6 +1566,23 @@ create or replace function public.nptc_teacher_save_stations(body jsonb) returns
 language sql security definer set search_path='' as $$select public.nptc_teacher_save_stations_v3(body)$$;
 
 -- 名冊使用目前規則直接寫入，不再轉接保留的舊版函式。
+
+alter table nptc_private.students add column if not exists service_kind text not null default 'hospital' check(service_kind in ('hospital','custom_medical','non_medical','unemployed'));
+create or replace function nptc_private.validate_service_institution(body jsonb,allow_empty boolean default false) returns void
+language plpgsql set search_path='' as $$
+declare kind text:=coalesce(body->>'serviceKind','hospital'); institution text:=trim(body->>'hospital');
+begin
+ if kind not in ('hospital','custom_medical','non_medical','unemployed') or jsonb_typeof(body->'hospital') is distinct from 'string'
+ or length(institution)>200 or (not allow_empty and coalesce(institution,'')='') then raise exception '請填寫服務機構，或勾選待業中。'; end if;
+ if kind='unemployed' then
+  if institution<>'目前待業中' or coalesce(trim(body->>'unit'),'')<>'' then raise exception '待業中不需填寫服務機構與單位。'; end if;
+ elsif kind='hospital' and institution<>'' and not exists(select 1 from nptc_private.hospital_directory where name=institution) then
+  raise exception '請從官方醫院名冊選擇，或選擇清單中找不到並自行填寫。';
+ elsif kind in ('custom_medical','non_medical') and institution='' then raise exception '請填寫服務機構名稱。';
+ end if;
+end;$$;
+revoke all on function nptc_private.validate_service_institution(jsonb,boolean) from public,anon,authenticated;
+
 create or replace function public.nptc_teacher_write(body jsonb) returns jsonb
 language plpgsql security definer set search_path='' as $$
 declare action text:=body->>'action';w nptc_private.workshops;s nptc_private.students;row_item jsonb;sid uuid;request_uuid uuid;request_record nptc_private.workshop_create_requests;affected integer;
@@ -1631,10 +1648,10 @@ begin
       or jsonb_typeof(row_item->'firstOsce') not in ('boolean','null')
       or jsonb_typeof(row_item->'birthDate') not in ('string','null')
       then raise exception '請確認學員基本資料格式。'; end if;
-    if row_item->>'hospital'<>'' and not exists(select 1 from nptc_private.hospital_directory where name=row_item->>'hospital') then raise exception '請從官方醫院名冊選擇服務醫院。'; end if;
+    perform nptc_private.validate_service_institution(row_item,true);
     if row_item->>'birthDate' is not null and ((row_item->>'birthDate') !~ '^\d{4}-\d{2}-\d{2}$' or (row_item->>'birthDate')::date not between date '1900-01-01' and current_date) then raise exception '請確認出生年月日。'; end if;
     update nptc_private.students set nursing_years=(row_item->>'nursingYears')::integer,
-      hospital=nullif(row_item->>'hospital',''),unit=nullif(trim(row_item->>'unit'),''),exam_specialty=nullif(row_item->>'examSpecialty',''),
+      service_kind=coalesce(row_item->>'serviceKind','hospital'),hospital=nullif(trim(row_item->>'hospital'),''),unit=nullif(trim(row_item->>'unit'),''),exam_specialty=nullif(row_item->>'examSpecialty',''),
       first_osce=(row_item->>'firstOsce')::boolean,birth_date=(row_item->>'birthDate')::date where id=s.id;
    end if;
   end if;
@@ -1671,12 +1688,12 @@ begin
  if jsonb_typeof(body->'nursingYears') is distinct from 'number' or (body->>'nursingYears')::numeric not between 0 and 60
  or (body->>'nursingYears')::numeric<>trunc((body->>'nursingYears')::numeric) or jsonb_typeof(body->'firstOsce') is distinct from 'boolean'
  or jsonb_typeof(body->'hospital') is distinct from 'string' or jsonb_typeof(body->'unit') is distinct from 'string'
- or coalesce(length(trim(body->>'unit')),0) not between 1 and 100
+ or coalesce(length(trim(body->>'unit')),0) not between 0 and 100
  or coalesce(body->>'examSpecialty','') not in ('內科','精神科','兒科','外科','婦產科','麻醉科','家庭科')
  or coalesce(body->>'birthDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then raise exception '請完整填寫有效的個人資料。'; end if;
- if not exists(select 1 from nptc_private.hospital_directory where name=body->>'hospital') then raise exception '請從目前的官方醫院名冊選擇服務醫院。'; end if;
+ perform nptc_private.validate_service_institution(body);
  if (body->>'birthDate')::date>current_date or (body->>'birthDate')::date<date '1900-01-01' then raise exception '請確認出生年月日。'; end if;
- update nptc_private.students s set nursing_years=(body->>'nursingYears')::integer,hospital=body->>'hospital',unit=trim(body->>'unit'),
+ update nptc_private.students s set nursing_years=(body->>'nursingYears')::integer,service_kind=coalesce(body->>'serviceKind','hospital'),hospital=trim(body->>'hospital'),unit=trim(body->>'unit'),
  exam_specialty=body->>'examSpecialty',first_osce=(body->>'firstOsce')::boolean,birth_date=(body->>'birthDate')::date,updated_at=now(),updated_by=auth.uid()
  where s.email=e and exists(select 1 from nptc_private.workshops w where w.id=s.workshop_id and w.archived_at is null);
  if not found then raise exception '目前沒有可更新的未封存學員名冊，請聯絡管理員。'; end if;
@@ -1754,7 +1771,7 @@ begin
  if s.id is null then raise exception '目前沒有您的學員名冊，請聯絡管理員。'; end if;
  return jsonb_build_object('stage',case when a.activated_at is null then 'profile' else 'active' end,
  'student',jsonb_build_object('name',s.name,'email',s.email,'phone',s.phone,
- 'nursingYears',s.nursing_years,'hospital',s.hospital,'unit',s.unit,
+ 'serviceKind',s.service_kind,'nursingYears',s.nursing_years,'hospital',s.hospital,'unit',s.unit,
  'examSpecialty',s.exam_specialty,'firstOsce',s.first_osce,'birthDate',s.birth_date));
 end;$$;
 
@@ -1791,7 +1808,7 @@ begin
   raise exception '請先設定登入密碼。';
  end if;
  if not exists(select 1 from nptc_private.students where email=e and nursing_years is not null
-  and length(trim(hospital))>0 and length(trim(unit))>0 and exam_specialty is not null
+  and length(trim(hospital))>0 and exam_specialty is not null
   and first_osce is not null and birth_date between date '1900-01-01' and current_date) then
   raise exception '請先完整填寫個人資料。';
  end if;
@@ -1804,7 +1821,7 @@ create or replace function nptc_private.student_data_before_activation() returns
 declare result jsonb;
 begin
  if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
- select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'email',s.email,'phone',s.phone,'workshopName',w.name,'archived',w.archived_at is not null,'published',case when jsonb_array_length(w.published_stations)>0 then 1 else 0 end,'profile',jsonb_build_object('nursingYears',s.nursing_years,'hospital',coalesce(s.hospital,''),'unit',coalesce(s.unit,''),'examSpecialty',coalesce(s.exam_specialty,''),'firstOsce',s.first_osce,'birthDate',coalesce(s.birth_date::text,'')),'stations',coalesce((select jsonb_agg(x.value order by x.ordinality) from jsonb_array_elements(w.stations) with ordinality x(value,ordinality) where exists(select 1 from jsonb_array_elements(w.published_stations) p where p->>'key'=x.value->>'key')),'[]'::jsonb),'updatedAt',s.updated_at,'grades',coalesce((select jsonb_agg(jsonb_build_object('key',g.station_key,'score',g.score,'rating',g.rating,'feedback',g.feedback,'domains',g.domain_scores)) from nptc_private.station_grades g where g.student_id=s.id and exists(select 1 from jsonb_array_elements(w.published_stations) p where p->>'key'=g.station_key)),'[]'::jsonb),'thresholds',nptc_private.dynamic_thresholds(w.id,true)) order by w.created_at desc,w.id),'[]'::jsonb) into result from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id where s.email=lower(auth.jwt()->>'email');
+ select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'email',s.email,'phone',s.phone,'workshopName',w.name,'archived',w.archived_at is not null,'published',case when jsonb_array_length(w.published_stations)>0 then 1 else 0 end,'profile',jsonb_build_object('serviceKind',s.service_kind,'nursingYears',s.nursing_years,'hospital',coalesce(s.hospital,''),'unit',coalesce(s.unit,''),'examSpecialty',coalesce(s.exam_specialty,''),'firstOsce',s.first_osce,'birthDate',coalesce(s.birth_date::text,'')),'stations',coalesce((select jsonb_agg(x.value order by x.ordinality) from jsonb_array_elements(w.stations) with ordinality x(value,ordinality) where exists(select 1 from jsonb_array_elements(w.published_stations) p where p->>'key'=x.value->>'key')),'[]'::jsonb),'updatedAt',s.updated_at,'grades',coalesce((select jsonb_agg(jsonb_build_object('key',g.station_key,'score',g.score,'rating',g.rating,'feedback',g.feedback,'domains',g.domain_scores)) from nptc_private.station_grades g where g.student_id=s.id and exists(select 1 from jsonb_array_elements(w.published_stations) p where p->>'key'=g.station_key)),'[]'::jsonb),'thresholds',nptc_private.dynamic_thresholds(w.id,true)) order by w.created_at desc,w.id),'[]'::jsonb) into result from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id where s.email=lower(auth.jwt()->>'email');
  return jsonb_build_object('records',result);
 end;$$;
 

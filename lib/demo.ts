@@ -14,6 +14,7 @@ type Student = Record<string, unknown> & {
   name: string;
   email: string;
   phone: string;
+  service_kind?: string;
   nursing_years?: number | null;
   hospital?: string | null;
   unit?: string | null;
@@ -115,7 +116,7 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
       const published = visibleStations.length ? 1 : 0;
       return {
         id: student.id, name: student.name, email: student.email, phone: student.phone, workshopName: workshop.name, archived: false, published,
-        profile: { nursingYears: student.nursing_years ?? null, hospital: student.hospital ?? '', unit: student.unit ?? '', examSpecialty: student.exam_specialty ?? '', firstOsce: student.first_osce ?? null, birthDate: student.birth_date ?? '' },
+        profile: { serviceKind: student.service_kind ?? 'hospital', nursingYears: student.nursing_years ?? null, hospital: student.hospital ?? '', unit: student.unit ?? '', examSpecialty: student.exam_specialty ?? '', firstOsce: student.first_osce ?? null, birthDate: student.birth_date ?? '' },
         stations: visibleStations,
         updatedAt: published ? student.updated_at : null,
         grades: published ? visibleStations.map(({ key }) => ({ key, score: student[`${key}_score`] ?? null, rating: student[`${key}_rating`] ?? null, feedback: student[`${key}_feedback`] ?? '', domains: student[`${key}_domains`] ?? null })) : [],
@@ -146,10 +147,10 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
     save(data); return { ok: true } as T;
   }
   if (name === 'nptc_student_update_profile') {
-    const body = args.body as { nursingYears?: number; hospital?: string; unit?: string; examSpecialty?: string; firstOsce?: boolean; birthDate?: string };
-    if (!Number.isInteger(body.nursingYears) || body.nursingYears! < 0 || body.nursingYears! > 60 || !body.hospital?.trim() || !body.unit?.trim() || !body.examSpecialty?.trim() || typeof body.firstOsce !== 'boolean' || !/^\d{4}-\d{2}-\d{2}$/.test(body.birthDate ?? '')) throw new Error('請完整填寫個人資料。');
-    data.students.filter((student) => student.email === user.email).forEach((student) => Object.assign(student, { nursing_years: body.nursingYears, hospital: body.hospital!.trim(), unit: body.unit!.trim(), exam_specialty: body.examSpecialty!.trim(), first_osce: body.firstOsce, birth_date: body.birthDate }));
-    if (!(await hospitalDirectory()).hospitals.some(h=>h.name===body.hospital)) throw new Error('請從目前的官方醫院名冊選擇服務醫院。');
+    const body = args.body as { serviceKind?: string; nursingYears?: number; hospital?: string; unit?: string; examSpecialty?: string; firstOsce?: boolean; birthDate?: string };
+    if (!Number.isInteger(body.nursingYears) || body.nursingYears! < 0 || body.nursingYears! > 60 || !body.hospital?.trim()  || !body.examSpecialty?.trim() || typeof body.firstOsce !== 'boolean' || !/^\d{4}-\d{2}-\d{2}$/.test(body.birthDate ?? '')) throw new Error('請完整填寫個人資料。');
+    data.students.filter((student) => student.email === user.email).forEach((student) => Object.assign(student, { service_kind: body.serviceKind ?? 'hospital', nursing_years: body.nursingYears, hospital: body.hospital!.trim(), unit: body.unit!.trim(), exam_specialty: body.examSpecialty!.trim(), first_osce: body.firstOsce, birth_date: body.birthDate }));
+    if ((!body.serviceKind || body.serviceKind === 'hospital') && !(await hospitalDirectory()).hospitals.some(h=>h.name===body.hospital)) throw new Error('請從目前的官方醫院名冊選擇服務醫院。');
     if (body.birthDate! > new Date().toISOString().slice(0,10) || body.birthDate! < '1900-01-01' || !['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].includes(body.examSpecialty!)) throw new Error('請確認出生年月日與科別。');
     save(data); return { ok: true } as T;
   }

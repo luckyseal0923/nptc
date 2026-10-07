@@ -1,11 +1,12 @@
+import { ServiceInstitution, serviceInstitutionValues } from '@/components/service-institution';
 import { useEffect, useState } from 'react';
 import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+import { type Hospital } from '@/components/hospital-picker';
 import { studentActivationError, studentAccountExists } from '@/lib/student-access-errors';
 
-type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
+type Student = { name: string; email: string; phone: string; nursingYears: number | null; serviceKind?: string; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
 export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
 const redirect = () => new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
 const message = (cause: unknown) => cause instanceof Error ? cause.message : '操作未完成，請稍後重試。';
@@ -82,7 +83,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
   const [hospitals, setHospitals] = useState<Hospital[]>([]), [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
-    rpc<{hospitals:Hospital[]}>('nptc_hospital_directory',{},controller.signal).then(data=>setHospitals(data.hospitals)).catch(e=>{if(e.name!=='AbortError')setError('醫院名冊無法載入，請重新整理後再試。');}).finally(()=>setLoading(false));
+    rpc<{hospitals:Hospital[]}>('nptc_hospital_directory',{},controller.signal).then(data=>setHospitals(data.hospitals)).catch(e=>{if(e.name!=='AbortError')setError('醫院名冊暫時無法載入，可選擇清單中找不到並自行填寫。');}).finally(()=>setLoading(false));
     return () => controller.abort();
   }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -93,9 +94,9 @@ export function StudentActivation({ email, status, onComplete }: { email: string
         sessionStorage.removeItem('nptc-activation-name'); sessionStorage.removeItem('nptc-activation-phone');
         if (result.stage === 'active') onComplete(); else setState(result);
       } else {
-        const password = passwordCreated ? null : passwordFrom(fields), hospital = String(fields.get('hospital') ?? '');
-        if (!hospitals.some(h => h.name === hospital)) throw new Error('請搜尋並點選服務醫院全名。');
-        await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit')).trim(), examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
+        const password = passwordCreated ? null : passwordFrom(fields);
+        const institution = serviceInstitutionValues(fields, hospitals);
+        await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), ...institution, examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
         if (password !== null) { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; }
         await rpc('nptc_finish_student_activation'); sessionStorage.removeItem('nptc-password-created'); onComplete();
       }
@@ -108,8 +109,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
       {state.stage === 'unclaimed' ? <><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" defaultValue={sessionStorage.getItem('nptc-activation-name') ?? ''} required /></label><label className="block">手機電話<Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" pattern="09[0-9]{8}" defaultValue={sessionStorage.getItem('nptc-activation-phone') ?? ''} required /></label></> : <>
         <div className="grid gap-4 sm:grid-cols-2"><label>姓名<Input className="mt-2 h-12 px-3 md:text-base" value={student?.name ?? ''} readOnly /></label><label>手機電話<Input className="mt-2 h-12 px-3 md:text-base" value={student?.phone ?? ''} readOnly /></label></div><p className="text-sm">以上資料由管理員建立，如需更正請聯絡管理員。</p>
         <label className="block">護理年資（年）<Input className="mt-2 h-12 px-3 md:text-base" name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={student?.nursingYears ?? ''} required /></label>
-        <HospitalPicker defaultValue={student?.hospital ?? ''} hospitals={hospitals} loading={loading} />
-        <label className="block">服務單位<Input className="mt-2 h-12 px-3 md:text-base" name="unit" maxLength={100} defaultValue={student?.unit ?? ''} required /></label>
+        <ServiceInstitution hospital={student?.hospital ?? ''} unit={student?.unit ?? ''} serviceKind={student?.serviceKind} hospitals={hospitals} loading={loading} />
         <label className="block">報考科別<select name="examSpecialty" defaultValue={student?.examSpecialty ?? ''} className="block w-full rounded border p-3" required><option value="">請選擇</option>{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(s => <option key={s}>{s}</option>)}</select></label>
         <label className="block">是否首次報考國家 OSCE<select name="firstOsce" defaultValue={student?.firstOsce == null ? '' : student.firstOsce ? 'yes' : 'no'} className="block w-full rounded border p-3" required><option value="">請選擇</option><option value="yes">是</option><option value="no">否</option></select></label>
         <label className="block">出生年月日<Input className="mt-2 h-12 px-3 md:text-base" name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /></label>

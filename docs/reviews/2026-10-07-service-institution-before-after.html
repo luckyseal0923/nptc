@@ -1,0 +1,2376 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>服務機構與待業中：程式修改對照</title><style>body{max-width:1100px;margin:40px auto;padding:20px;font:16px/1.7 sans-serif}pre{white-space:pre-wrap;padding:20px;background:#f1f5f3;font:13px/1.6 monospace}summary{cursor:pointer;padding:10px;background:#eaf2df}</style><h1>服務機構與待業中</h1><p>待業中、清單外醫療院所與非醫療機構可儲存並完成啟用；服務單位選填。以下提供各檔案完整修改前後內容。</p><h2>components/service-institution.tsx</h2><details><summary>修改前完整檔案</summary><pre>（新增檔案）</pre></details><details><summary>修改後完整檔案</summary><pre>import { useState } from 'react';
+import { HospitalPicker, type Hospital } from './hospital-picker';
+import { Input } from './ui/input';
+
+export function ServiceInstitution({ hospital = '', unit = '', serviceKind = 'hospital', hospitals, loading }: {
+  hospital?: string; unit?: string; serviceKind?: string; hospitals: Hospital[]; loading: boolean;
+}) {
+  const [kind, setKind] = useState(serviceKind);
+  const [previousKind, setPreviousKind] = useState(serviceKind === 'unemployed' ? 'hospital' : serviceKind);
+  const [custom, setCustom] = useState(serviceKind === 'unemployed' ? '' : hospital);
+  const [department, setDepartment] = useState(unit);
+  const unemployed = kind === 'unemployed';
+  return &lt;div className="service-institution"&gt;
+    &lt;label className="employment-check"&gt;&lt;input type="checkbox" checked={unemployed} onChange={event =&gt; {
+      if (event.target.checked) { setPreviousKind(kind); setKind('unemployed'); } else setKind(previousKind);
+    }}/&gt;待業中&lt;/label&gt;
+    &lt;input type="hidden" name="serviceKind" value={kind}/&gt;
+    {unemployed ? &lt;label&gt;目前服務狀態／機構&lt;Input value="目前待業中" readOnly/&gt;&lt;input type="hidden" name="hospital" value="目前待業中"/&gt;&lt;/label&gt; : &lt;&gt;
+      &lt;label&gt;目前服務狀態／機構&lt;select value={kind} onChange={event =&gt; setKind(event.target.value)} className="block w-full rounded border p-3"&gt;
+        &lt;option value="hospital"&gt;任職醫療院所（搜尋名冊）&lt;/option&gt;
+        &lt;option value="custom_medical"&gt;任職醫療院所（清單中找不到）&lt;/option&gt;
+        &lt;option value="non_medical"&gt;任職非醫療機構&lt;/option&gt;
+      &lt;/select&gt;&lt;/label&gt;
+      {kind === 'hospital' ? &lt;HospitalPicker defaultValue={serviceKind === 'hospital' ? hospital : ''} hospitals={hospitals} loading={loading}/&gt; : &lt;label&gt;{kind === 'non_medical' ? '機構名稱' : '院所名稱'}&lt;Input name="hospital" value={custom} onChange={event =&gt; setCustom(event.target.value)} required maxLength={200} placeholder="請填寫完整名稱"/&gt;&lt;/label&gt;}
+    &lt;/&gt;}
+    &lt;label&gt;服務單位（選填）&lt;Input value={unemployed ? '' : department} onChange={event =&gt; setDepartment(event.target.value)} disabled={unemployed} maxLength={100}/&gt;&lt;input type="hidden" name="unit" value={unemployed ? '' : department}/&gt;&lt;/label&gt;
+  &lt;/div&gt;;
+}
+
+export function serviceInstitutionValues(fields: FormData, hospitals: Hospital[], allowEmpty = false) {
+  const serviceKind = String(fields.get('serviceKind') ?? 'hospital');
+  const hospital = String(fields.get('hospital') ?? '').trim();
+  const unit = String(fields.get('unit') ?? '').trim();
+  if (serviceKind === 'unemployed') return { serviceKind, hospital: '目前待業中', unit: '' };
+  if ((!hospital &amp;&amp; !allowEmpty) || hospital.length &gt; 200) throw new Error('請填寫服務機構，或勾選「待業中」。');
+  if (serviceKind === 'hospital' &amp;&amp; (hospital || fields.get('hospitalQuery')) &amp;&amp; !hospitals.some(item =&gt; item.name === hospital)) throw new Error('請點選醫院搜尋結果；找不到時選擇「清單中找不到」。');
+  return { serviceKind, hospital, unit };
+}
+</pre></details><h2>components/student-access.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useEffect, useState } from 'react';
+import { rpc, supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+import { studentActivationError, studentAccountExists } from '@/lib/student-access-errors';
+
+type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
+export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
+const redirect = () =&gt; new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
+const message = (cause: unknown) =&gt; cause instanceof Error ? cause.message : '操作未完成，請稍後重試。';
+function PasswordFields() {
+  return &lt;&gt;&lt;label className="block"&gt;設定密碼（至少 8 個字元）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;再次輸入密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;/&gt;;
+}
+function passwordFrom(form: FormData) {
+  const password = String(form.get('password') ?? '');
+  if (password.length &lt; 8 || password !== form.get('confirm')) throw new Error('密碼須至少 8 個字元，且兩次輸入須相同。');
+  return password;
+}
+
+export function StudentLogin() {
+  const [mode, setMode] = useState&lt;'activate' | 'login' | 'reset' | 'confirm'&gt;('login');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [sent, setSent] = useState('');
+  function changeMode(next: typeof mode) { setMode(next); setError(''); setSent(''); }
+  const heading = mode === 'activate' ? '第一次使用本平台？建立帳號' : mode === 'reset' ? '忘記密碼' : mode === 'confirm' ? '重新寄送確認信' : '學員登入';
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget);
+    setBusy(true); setError(''); setSent('');
+    try {
+      const email = String(fields.get('email')).trim();
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: String(fields.get('password')) });
+        if (error) throw new Error('登入未完成，請確認 Email 與密碼。忘記密碼可申請重設；尚未確認信箱者可重新寄送確認信。');
+      } else if (mode === 'activate') {
+        sessionStorage.setItem('nptc-activation-name', String(fields.get('name')).trim());
+        sessionStorage.setItem('nptc-activation-phone', String(fields.get('phone')).trim());
+        const password = passwordFrom(fields);
+        const { error } = await supabase.functions.invoke('student-activate', { body: {
+          email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
+          password,
+        } });
+        if (error) {
+          const guidance = studentActivationError(error);
+          if (studentAccountExists(error)) { window.alert(guidance); setMode('login'); }
+          throw new Error(guidance);
+        }
+        sessionStorage.setItem('nptc-password-created', email.toLowerCase());
+        const login = await supabase.auth.signInWithPassword({ email, password });
+        if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
+      } else if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
+        if (error) throw new Error('重設密碼信件暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 可用於重設密碼，您將收到重設連結，請至信箱查看。');
+      } else {
+        const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirect() } });
+        if (error) throw new Error('確認信暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 有待確認的註冊申請，您將收到確認信。請完成信箱確認後登入，再接續核對名冊與補齊個人資料。');
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  return &lt;section className="mx-auto max-w-4xl px-6 py-12"&gt;
+    &lt;h1 className="text-3xl font-bold"&gt;學員專區&lt;/h1&gt;&lt;p className="mt-3 mb-8"&gt;帳號只需建立一次。曾參加其他梯次並完成啟用者，請以原本的 Email 與密碼直接登入。&lt;/p&gt;
+    &lt;div className="grid gap-4 sm:grid-cols-2"&gt;{(['login', 'activate'] as const).map(value =&gt; &lt;button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() =&gt; changeMode(value)} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}&gt;&lt;strong className="block text-xl"&gt;{value === 'activate' ? '第一次使用本平台？建立帳號' : '學員登入'}&lt;/strong&gt;&lt;span className="mt-2 block text-sm"&gt;{value === 'activate' ? '核對名冊並建立帳號，完成後即可跨梯次使用' : '已有帳號或參加新梯次，請從這裡登入'}&lt;/span&gt;&lt;/button&gt;)}&lt;/div&gt;
+    &lt;form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8"&gt;
+      &lt;h2 className="text-xl font-bold"&gt;{heading}&lt;/h2&gt;
+      {mode === 'activate' &amp;&amp; &lt;&gt;&lt;p className="text-sm"&gt;填寫老師名冊登錄的姓名、Email 與完整手機號碼，並設定登入密碼。新帳號核對成功後即可建立，不需要驗證信。曾建立帳號者請直接登入；若尚未完成啟用，登入後可接續填寫資料。&lt;/p&gt;&lt;label className="block"&gt;姓名&lt;Input id="student-activation-name" className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /&gt;&lt;/label&gt;&lt;/&gt;}
+      {mode === 'confirm' &amp;&amp; &lt;p className="text-sm"&gt;若曾註冊但尚未確認信箱，可重新寄送確認信。完成確認後，請使用原本的密碼登入。&lt;/p&gt;}
+      &lt;label className="block"&gt;Email&lt;Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /&gt;&lt;/label&gt;
+      {mode === 'activate' &amp;&amp; &lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /&gt;&lt;/label&gt;}
+      {mode === 'activate' &amp;&amp; &lt;PasswordFields /&gt;}
+      {mode === 'login' &amp;&amp; &lt;label className="block"&gt;密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /&gt;&lt;/label&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}{sent &amp;&amp; &lt;p role="status" className="rounded bg-green-50 p-3"&gt;{sent}&lt;/p&gt;}
+      {mode === 'activate' &amp;&amp; error &amp;&amp; &lt;div className="flex flex-wrap gap-5 text-sm"&gt;{error.includes('核對名冊') &amp;&amp; &lt;a className="underline" href="#student-activation-name"&gt;重新核對資料&lt;/a&gt;}&lt;button type="button" disabled={busy} className="underline" onClick={() =&gt; changeMode('login')}&gt;改用學員登入&lt;/button&gt;&lt;/div&gt;}
+      &lt;div className="flex flex-wrap items-center gap-5"&gt;&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : mode === 'confirm' ? '寄送確認信' : '登入'}&lt;/Button&gt;&lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; changeMode(mode === 'reset' || mode === 'confirm' ? 'login' : 'reset')}&gt;{mode === 'reset' || mode === 'confirm' ? '返回登入' : '忘記密碼？'}&lt;/button&gt;{mode === 'login' &amp;&amp; &lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; changeMode('confirm')}&gt;重新寄送確認信&lt;/button&gt;}&lt;/div&gt;
+    &lt;/form&gt;
+  &lt;/section&gt;;
+}
+
+export function StudentActivation({ email, status, onComplete }: { email: string; status: Onboarding; onComplete: () =&gt; void }) {
+  const passwordCreated = sessionStorage.getItem('nptc-password-created') === email.toLowerCase();
+  const [state, setState] = useState(status), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]), [loading, setLoading] = useState(true);
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},controller.signal).then(data=&gt;setHospitals(data.hospitals)).catch(e=&gt;{if(e.name!=='AbortError')setError('醫院名冊無法載入，請重新整理後再試。');}).finally(()=&gt;setLoading(false));
+    return () =&gt; controller.abort();
+  }, []);
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try {
+      if (state.stage === 'unclaimed') {
+        const result = await rpc&lt;Onboarding&gt;('nptc_claim_student', { body: { name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim() } });
+        sessionStorage.removeItem('nptc-activation-name'); sessionStorage.removeItem('nptc-activation-phone');
+        if (result.stage === 'active') onComplete(); else setState(result);
+      } else {
+        const password = passwordCreated ? null : passwordFrom(fields), hospital = String(fields.get('hospital') ?? '');
+        if (!hospitals.some(h =&gt; h.name === hospital)) throw new Error('請搜尋並點選服務醫院全名。');
+        await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit')).trim(), examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
+        if (password !== null) { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; }
+        await rpc('nptc_finish_student_activation'); sessionStorage.removeItem('nptc-password-created'); onComplete();
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  const student = state.student;
+  return &lt;section className="mx-auto max-w-3xl px-6 py-12"&gt;&lt;h1 className="text-2xl font-bold"&gt;完成首次啟用&lt;/h1&gt;&lt;p className="my-4"&gt;{state.stage === 'unclaimed' ? '已登入，請核對報名姓名與手機。' : '名冊已核對，請補齊個人資料並設定日後登入密碼。'}&lt;/p&gt;
+    &lt;form onSubmit={submit} className="space-y-5 rounded-xl border bg-white p-6" key={state.stage}&gt;
+      &lt;label className="block"&gt;Email（登入帳號）&lt;Input className="mt-2 h-12 px-3 md:text-base" value={email} readOnly /&gt;&lt;/label&gt;
+      {state.stage === 'unclaimed' ? &lt;&gt;&lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" defaultValue={sessionStorage.getItem('nptc-activation-name') ?? ''} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" pattern="09[0-9]{8}" defaultValue={sessionStorage.getItem('nptc-activation-phone') ?? ''} required /&gt;&lt;/label&gt;&lt;/&gt; : &lt;&gt;
+        &lt;div className="grid gap-4 sm:grid-cols-2"&gt;&lt;label&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.name ?? ''} readOnly /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.phone ?? ''} readOnly /&gt;&lt;/label&gt;&lt;/div&gt;&lt;p className="text-sm"&gt;以上資料由管理員建立，如需更正請聯絡管理員。&lt;/p&gt;
+        &lt;label className="block"&gt;護理年資（年）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={student?.nursingYears ?? ''} required /&gt;&lt;/label&gt;
+        &lt;HospitalPicker defaultValue={student?.hospital ?? ''} hospitals={hospitals} loading={loading} /&gt;
+        &lt;label className="block"&gt;服務單位&lt;Input className="mt-2 h-12 px-3 md:text-base" name="unit" maxLength={100} defaultValue={student?.unit ?? ''} required /&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;報考科別&lt;select name="examSpecialty" defaultValue={student?.examSpecialty ?? ''} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(s =&gt; &lt;option key={s}&gt;{s}&lt;/option&gt;)}&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;是否首次報考國家 OSCE&lt;select name="firstOsce" defaultValue={student?.firstOsce == null ? '' : student.firstOsce ? 'yes' : 'no'} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;&lt;option value="yes"&gt;是&lt;/option&gt;&lt;option value="no"&gt;否&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;出生年月日&lt;Input className="mt-2 h-12 px-3 md:text-base" name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /&gt;&lt;/label&gt;
+        {!passwordCreated &amp;&amp; &lt;PasswordFields /&gt;}
+      &lt;/&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy || (state.stage === 'profile' &amp;&amp; loading)}&gt;{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}&lt;/Button&gt;
+    &lt;/form&gt;&lt;/section&gt;;
+}
+
+export function ResetStudentPassword({ onComplete, teacher = false }: { onComplete: () =&gt; void; teacher?: boolean }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  return &lt;form className="mx-auto my-12 max-w-lg space-y-5 rounded-xl border bg-white p-6" onSubmit={async event =&gt; {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try { const { data, error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; if (!teacher &amp;&amp; data.user?.email) sessionStorage.setItem('nptc-password-created', data.user.email.toLowerCase()); history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
+    catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }}&gt;&lt;h1 className="text-2xl font-bold"&gt;重設登入密碼&lt;/h1&gt;&lt;PasswordFields /&gt;{error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '儲存中…' : '儲存新密碼'}&lt;/Button&gt;&lt;/form&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { ServiceInstitution, serviceInstitutionValues } from '@/components/service-institution';
+import { useEffect, useState } from 'react';
+import { rpc, supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { type Hospital } from '@/components/hospital-picker';
+import { studentActivationError, studentAccountExists } from '@/lib/student-access-errors';
+
+type Student = { name: string; email: string; phone: string; nursingYears: number | null; serviceKind?: string; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
+export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
+const redirect = () =&gt; new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
+const message = (cause: unknown) =&gt; cause instanceof Error ? cause.message : '操作未完成，請稍後重試。';
+function PasswordFields() {
+  return &lt;&gt;&lt;label className="block"&gt;設定密碼（至少 8 個字元）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;再次輸入密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;/&gt;;
+}
+function passwordFrom(form: FormData) {
+  const password = String(form.get('password') ?? '');
+  if (password.length &lt; 8 || password !== form.get('confirm')) throw new Error('密碼須至少 8 個字元，且兩次輸入須相同。');
+  return password;
+}
+
+export function StudentLogin() {
+  const [mode, setMode] = useState&lt;'activate' | 'login' | 'reset' | 'confirm'&gt;('login');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [sent, setSent] = useState('');
+  function changeMode(next: typeof mode) { setMode(next); setError(''); setSent(''); }
+  const heading = mode === 'activate' ? '第一次使用本平台？建立帳號' : mode === 'reset' ? '忘記密碼' : mode === 'confirm' ? '重新寄送確認信' : '學員登入';
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget);
+    setBusy(true); setError(''); setSent('');
+    try {
+      const email = String(fields.get('email')).trim();
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: String(fields.get('password')) });
+        if (error) throw new Error('登入未完成，請確認 Email 與密碼。忘記密碼可申請重設；尚未確認信箱者可重新寄送確認信。');
+      } else if (mode === 'activate') {
+        sessionStorage.setItem('nptc-activation-name', String(fields.get('name')).trim());
+        sessionStorage.setItem('nptc-activation-phone', String(fields.get('phone')).trim());
+        const password = passwordFrom(fields);
+        const { error } = await supabase.functions.invoke('student-activate', { body: {
+          email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
+          password,
+        } });
+        if (error) {
+          const guidance = studentActivationError(error);
+          if (studentAccountExists(error)) { window.alert(guidance); setMode('login'); }
+          throw new Error(guidance);
+        }
+        sessionStorage.setItem('nptc-password-created', email.toLowerCase());
+        const login = await supabase.auth.signInWithPassword({ email, password });
+        if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
+      } else if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
+        if (error) throw new Error('重設密碼信件暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 可用於重設密碼，您將收到重設連結，請至信箱查看。');
+      } else {
+        const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirect() } });
+        if (error) throw new Error('確認信暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 有待確認的註冊申請，您將收到確認信。請完成信箱確認後登入，再接續核對名冊與補齊個人資料。');
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  return &lt;section className="mx-auto max-w-4xl px-6 py-12"&gt;
+    &lt;h1 className="text-3xl font-bold"&gt;學員專區&lt;/h1&gt;&lt;p className="mt-3 mb-8"&gt;帳號只需建立一次。曾參加其他梯次並完成啟用者，請以原本的 Email 與密碼直接登入。&lt;/p&gt;
+    &lt;div className="grid gap-4 sm:grid-cols-2"&gt;{(['login', 'activate'] as const).map(value =&gt; &lt;button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() =&gt; changeMode(value)} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}&gt;&lt;strong className="block text-xl"&gt;{value === 'activate' ? '第一次使用本平台？建立帳號' : '學員登入'}&lt;/strong&gt;&lt;span className="mt-2 block text-sm"&gt;{value === 'activate' ? '核對名冊並建立帳號，完成後即可跨梯次使用' : '已有帳號或參加新梯次，請從這裡登入'}&lt;/span&gt;&lt;/button&gt;)}&lt;/div&gt;
+    &lt;form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8"&gt;
+      &lt;h2 className="text-xl font-bold"&gt;{heading}&lt;/h2&gt;
+      {mode === 'activate' &amp;&amp; &lt;&gt;&lt;p className="text-sm"&gt;填寫老師名冊登錄的姓名、Email 與完整手機號碼，並設定登入密碼。新帳號核對成功後即可建立，不需要驗證信。曾建立帳號者請直接登入；若尚未完成啟用，登入後可接續填寫資料。&lt;/p&gt;&lt;label className="block"&gt;姓名&lt;Input id="student-activation-name" className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /&gt;&lt;/label&gt;&lt;/&gt;}
+      {mode === 'confirm' &amp;&amp; &lt;p className="text-sm"&gt;若曾註冊但尚未確認信箱，可重新寄送確認信。完成確認後，請使用原本的密碼登入。&lt;/p&gt;}
+      &lt;label className="block"&gt;Email&lt;Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /&gt;&lt;/label&gt;
+      {mode === 'activate' &amp;&amp; &lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /&gt;&lt;/label&gt;}
+      {mode === 'activate' &amp;&amp; &lt;PasswordFields /&gt;}
+      {mode === 'login' &amp;&amp; &lt;label className="block"&gt;密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /&gt;&lt;/label&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}{sent &amp;&amp; &lt;p role="status" className="rounded bg-green-50 p-3"&gt;{sent}&lt;/p&gt;}
+      {mode === 'activate' &amp;&amp; error &amp;&amp; &lt;div className="flex flex-wrap gap-5 text-sm"&gt;{error.includes('核對名冊') &amp;&amp; &lt;a className="underline" href="#student-activation-name"&gt;重新核對資料&lt;/a&gt;}&lt;button type="button" disabled={busy} className="underline" onClick={() =&gt; changeMode('login')}&gt;改用學員登入&lt;/button&gt;&lt;/div&gt;}
+      &lt;div className="flex flex-wrap items-center gap-5"&gt;&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : mode === 'confirm' ? '寄送確認信' : '登入'}&lt;/Button&gt;&lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; changeMode(mode === 'reset' || mode === 'confirm' ? 'login' : 'reset')}&gt;{mode === 'reset' || mode === 'confirm' ? '返回登入' : '忘記密碼？'}&lt;/button&gt;{mode === 'login' &amp;&amp; &lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; changeMode('confirm')}&gt;重新寄送確認信&lt;/button&gt;}&lt;/div&gt;
+    &lt;/form&gt;
+  &lt;/section&gt;;
+}
+
+export function StudentActivation({ email, status, onComplete }: { email: string; status: Onboarding; onComplete: () =&gt; void }) {
+  const passwordCreated = sessionStorage.getItem('nptc-password-created') === email.toLowerCase();
+  const [state, setState] = useState(status), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]), [loading, setLoading] = useState(true);
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},controller.signal).then(data=&gt;setHospitals(data.hospitals)).catch(e=&gt;{if(e.name!=='AbortError')setError('醫院名冊暫時無法載入，可選擇清單中找不到並自行填寫。');}).finally(()=&gt;setLoading(false));
+    return () =&gt; controller.abort();
+  }, []);
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try {
+      if (state.stage === 'unclaimed') {
+        const result = await rpc&lt;Onboarding&gt;('nptc_claim_student', { body: { name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim() } });
+        sessionStorage.removeItem('nptc-activation-name'); sessionStorage.removeItem('nptc-activation-phone');
+        if (result.stage === 'active') onComplete(); else setState(result);
+      } else {
+        const password = passwordCreated ? null : passwordFrom(fields);
+        const institution = serviceInstitutionValues(fields, hospitals);
+        await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), ...institution, examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
+        if (password !== null) { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; }
+        await rpc('nptc_finish_student_activation'); sessionStorage.removeItem('nptc-password-created'); onComplete();
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  const student = state.student;
+  return &lt;section className="mx-auto max-w-3xl px-6 py-12"&gt;&lt;h1 className="text-2xl font-bold"&gt;完成首次啟用&lt;/h1&gt;&lt;p className="my-4"&gt;{state.stage === 'unclaimed' ? '已登入，請核對報名姓名與手機。' : '名冊已核對，請補齊個人資料並設定日後登入密碼。'}&lt;/p&gt;
+    &lt;form onSubmit={submit} className="space-y-5 rounded-xl border bg-white p-6" key={state.stage}&gt;
+      &lt;label className="block"&gt;Email（登入帳號）&lt;Input className="mt-2 h-12 px-3 md:text-base" value={email} readOnly /&gt;&lt;/label&gt;
+      {state.stage === 'unclaimed' ? &lt;&gt;&lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" defaultValue={sessionStorage.getItem('nptc-activation-name') ?? ''} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" pattern="09[0-9]{8}" defaultValue={sessionStorage.getItem('nptc-activation-phone') ?? ''} required /&gt;&lt;/label&gt;&lt;/&gt; : &lt;&gt;
+        &lt;div className="grid gap-4 sm:grid-cols-2"&gt;&lt;label&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.name ?? ''} readOnly /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.phone ?? ''} readOnly /&gt;&lt;/label&gt;&lt;/div&gt;&lt;p className="text-sm"&gt;以上資料由管理員建立，如需更正請聯絡管理員。&lt;/p&gt;
+        &lt;label className="block"&gt;護理年資（年）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={student?.nursingYears ?? ''} required /&gt;&lt;/label&gt;
+        &lt;ServiceInstitution hospital={student?.hospital ?? ''} unit={student?.unit ?? ''} serviceKind={student?.serviceKind} hospitals={hospitals} loading={loading} /&gt;
+        &lt;label className="block"&gt;報考科別&lt;select name="examSpecialty" defaultValue={student?.examSpecialty ?? ''} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(s =&gt; &lt;option key={s}&gt;{s}&lt;/option&gt;)}&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;是否首次報考國家 OSCE&lt;select name="firstOsce" defaultValue={student?.firstOsce == null ? '' : student.firstOsce ? 'yes' : 'no'} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;&lt;option value="yes"&gt;是&lt;/option&gt;&lt;option value="no"&gt;否&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;出生年月日&lt;Input className="mt-2 h-12 px-3 md:text-base" name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /&gt;&lt;/label&gt;
+        {!passwordCreated &amp;&amp; &lt;PasswordFields /&gt;}
+      &lt;/&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy || (state.stage === 'profile' &amp;&amp; loading)}&gt;{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}&lt;/Button&gt;
+    &lt;/form&gt;&lt;/section&gt;;
+}
+
+export function ResetStudentPassword({ onComplete, teacher = false }: { onComplete: () =&gt; void; teacher?: boolean }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  return &lt;form className="mx-auto my-12 max-w-lg space-y-5 rounded-xl border bg-white p-6" onSubmit={async event =&gt; {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try { const { data, error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; if (!teacher &amp;&amp; data.user?.email) sessionStorage.setItem('nptc-password-created', data.user.email.toLowerCase()); history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
+    catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }}&gt;&lt;h1 className="text-2xl font-bold"&gt;重設登入密碼&lt;/h1&gt;&lt;PasswordFields /&gt;{error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '儲存中…' : '儲存新密碼'}&lt;/Button&gt;&lt;/form&gt;;
+}
+</pre></details><h2>components/student-edit-dialog.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useEffect, useRef, useState } from 'react';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { rpc } from '@/lib/supabase';
+import type { Student } from '@/lib/grading';
+
+export function StudentEditDialog({ student, busy, error, onClose, onSave }: {
+  student: Student; busy: boolean; error: string; onClose: () =&gt; void;
+  onSave: (body: Record&lt;string, unknown&gt;) =&gt; Promise&lt;boolean&gt;;
+}) {
+  const dialog = useRef&lt;HTMLDialogElement&gt;(null);
+  const [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]);
+  const [loading, setLoading] = useState(true);
+  const [localError, setLocalError] = useState('');
+  const value = (key: string) =&gt; student[key] == null ? '' : String(student[key]);
+  useEffect(() =&gt; {
+    const element = dialog.current;
+    element?.showModal();
+    const controller = new AbortController();
+    rpc&lt;{ hospitals: Hospital[] }&gt;('nptc_hospital_directory', {}, controller.signal)
+      .then(data =&gt; setHospitals(data.hospitals))
+      .catch(cause =&gt; { if (cause.name !== 'AbortError') setLocalError('無法載入醫院名冊，請關閉視窗後重試。'); })
+      .finally(() =&gt; setLoading(false));
+    return () =&gt; { controller.abort(); element?.close(); };
+  }, []);
+  return &lt;dialog ref={dialog} aria-labelledby="student-edit-title" className="student-edit-dialog" onCancel={event =&gt; { event.preventDefault(); if (!busy) onClose(); }}&gt;
+    &lt;div className="panel-heading"&gt;&lt;h2 id="student-edit-title"&gt;編輯學員基本資料&lt;/h2&gt;&lt;Button type="button" variant="outline" disabled={busy} onClick={onClose}&gt;關閉&lt;/Button&gt;&lt;/div&gt;
+    &lt;p className="form-help"&gt;基本資料更新適用於目前梯次。&lt;/p&gt;
+    &lt;form className="entry-form" onSubmit={async event =&gt; {
+      event.preventDefault(); setLocalError('');
+      const fields = new FormData(event.currentTarget);
+      const hospital = String(fields.get('hospital') ?? '');
+      const hospitalQuery = event.currentTarget.querySelector&lt;HTMLInputElement&gt;('.hospital-picker input:not([type="hidden"])')?.value.trim();
+      if (hospitalQuery &amp;&amp; !hospital) { setLocalError('請點選搜尋結果中的服務醫院，或清空搜尋欄位。'); return; }
+      if (hospital &amp;&amp; !hospitals.some(item =&gt; item.name === hospital)) { setLocalError('請從官方名冊選擇服務醫院。'); return; }
+      const nullable = (key: string) =&gt; fields.get(key) === '' ? null : fields.get(key);
+      await onSave({ action: 'saveStudent', id: student.id, revision: student.revision,
+        name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone'),
+        profile: { nursingYears: nullable('nursingYears') === null ? null : Number(fields.get('nursingYears')),
+          hospital, unit: fields.get('unit'), examSpecialty: fields.get('examSpecialty'),
+          firstOsce: nullable('firstOsce') === null ? null : fields.get('firstOsce') === 'yes', birthDate: nullable('birthDate') },
+      });
+    }}&gt;&lt;fieldset disabled={busy || loading || hospitals.length === 0}&gt;
+      &lt;div className="profile-grid"&gt;
+        &lt;label&gt;姓名&lt;Input name="name" required maxLength={100} defaultValue={student.name}/&gt;&lt;/label&gt;
+        &lt;label&gt;Email&lt;Input name="email" type="email" required maxLength={254} defaultValue={student.email} readOnly/&gt;&lt;/label&gt;
+        &lt;label&gt;手機電話&lt;Input name="phone" type="tel" required pattern="09[0-9]{8}" inputMode="numeric" defaultValue={student.phone}/&gt;&lt;/label&gt;
+        &lt;label&gt;護理年資&lt;Input name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={value('nursing_years')}/&gt;&lt;/label&gt;
+        &lt;HospitalPicker defaultValue={value('hospital')} hospitals={hospitals} loading={loading}/&gt;
+        &lt;label&gt;服務單位&lt;Input name="unit" maxLength={100} defaultValue={value('unit')}/&gt;&lt;/label&gt;
+        &lt;label&gt;報考科別&lt;NativeSelect name="examSpecialty" defaultValue={value('exam_specialty')}&gt;&lt;NativeSelectOption value=""&gt;尚未填寫&lt;/NativeSelectOption&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(item =&gt; &lt;NativeSelectOption key={item} value={item}&gt;{item}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;
+        &lt;label&gt;首次報考國家 OSCE&lt;NativeSelect name="firstOsce" defaultValue={student.first_osce == null ? '' : student.first_osce ? 'yes' : 'no'}&gt;&lt;NativeSelectOption value=""&gt;尚未填寫&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="yes"&gt;是&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="no"&gt;否&lt;/NativeSelectOption&gt;&lt;/NativeSelect&gt;&lt;/label&gt;
+        &lt;label&gt;出生年月日&lt;Input name="birthDate" type="date" min="1900-01-01" defaultValue={value('birth_date')}/&gt;&lt;/label&gt;
+      &lt;/div&gt;
+      &lt;p className="form-help"&gt;Email 為唯讀，登入帳號不會因本次編輯而變更。&lt;/p&gt;
+      {(localError || error) &amp;&amp; &lt;p role="alert" className="notice error"&gt;{localError || error}&lt;/p&gt;}
+      &lt;div className="form-actions"&gt;&lt;Button type="submit" className="action"&gt;{busy ? '儲存中…' : '儲存學員資料'}&lt;/Button&gt;&lt;Button type="button" variant="outline" onClick={onClose}&gt;取消&lt;/Button&gt;&lt;/div&gt;
+    &lt;/fieldset&gt;&lt;/form&gt;
+    {loading &amp;&amp; &lt;p role="status"&gt;正在載入醫院名冊…&lt;/p&gt;}
+    {!loading &amp;&amp; hospitals.length === 0 &amp;&amp; &lt;p role="alert" className="notice error"&gt;{localError || '醫院名冊尚未載入，請重新開啟。'}&lt;/p&gt;}
+  &lt;/dialog&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { ServiceInstitution, serviceInstitutionValues } from '@/components/service-institution';
+import { useEffect, useRef, useState } from 'react';
+import { type Hospital } from '@/components/hospital-picker';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { rpc } from '@/lib/supabase';
+import type { Student } from '@/lib/grading';
+
+export function StudentEditDialog({ student, busy, error, onClose, onSave }: {
+  student: Student; busy: boolean; error: string; onClose: () =&gt; void;
+  onSave: (body: Record&lt;string, unknown&gt;) =&gt; Promise&lt;boolean&gt;;
+}) {
+  const dialog = useRef&lt;HTMLDialogElement&gt;(null);
+  const [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]);
+  const [loading, setLoading] = useState(true);
+  const [localError, setLocalError] = useState('');
+  const value = (key: string) =&gt; student[key] == null ? '' : String(student[key]);
+  useEffect(() =&gt; {
+    const element = dialog.current;
+    element?.showModal();
+    const controller = new AbortController();
+    rpc&lt;{ hospitals: Hospital[] }&gt;('nptc_hospital_directory', {}, controller.signal)
+      .then(data =&gt; setHospitals(data.hospitals))
+      .catch(cause =&gt; { if (cause.name !== 'AbortError') setLocalError('醫院名冊暫時無法載入，可選擇清單中找不到並自行填寫。'); })
+      .finally(() =&gt; setLoading(false));
+    return () =&gt; { controller.abort(); element?.close(); };
+  }, []);
+  return &lt;dialog ref={dialog} aria-labelledby="student-edit-title" className="student-edit-dialog" onCancel={event =&gt; { event.preventDefault(); if (!busy) onClose(); }}&gt;
+    &lt;div className="panel-heading"&gt;&lt;h2 id="student-edit-title"&gt;編輯學員基本資料&lt;/h2&gt;&lt;Button type="button" variant="outline" disabled={busy} onClick={onClose}&gt;關閉&lt;/Button&gt;&lt;/div&gt;
+    &lt;p className="form-help"&gt;基本資料更新適用於目前梯次。&lt;/p&gt;
+    &lt;form className="entry-form" onSubmit={async event =&gt; {
+      event.preventDefault(); setLocalError('');
+      const fields = new FormData(event.currentTarget);
+      let institution;
+      try { institution = serviceInstitutionValues(fields, hospitals, true); } catch (cause) { setLocalError((cause as Error).message); return; }
+      const nullable = (key: string) =&gt; fields.get(key) === '' ? null : fields.get(key);
+      await onSave({ action: 'saveStudent', id: student.id, revision: student.revision,
+        name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone'),
+        profile: { nursingYears: nullable('nursingYears') === null ? null : Number(fields.get('nursingYears')),
+          ...institution, examSpecialty: fields.get('examSpecialty'),
+          firstOsce: nullable('firstOsce') === null ? null : fields.get('firstOsce') === 'yes', birthDate: nullable('birthDate') },
+      });
+    }}&gt;&lt;fieldset disabled={busy || loading}&gt;
+      &lt;div className="profile-grid"&gt;
+        &lt;label&gt;姓名&lt;Input name="name" required maxLength={100} defaultValue={student.name}/&gt;&lt;/label&gt;
+        &lt;label&gt;Email&lt;Input name="email" type="email" required maxLength={254} defaultValue={student.email} readOnly/&gt;&lt;/label&gt;
+        &lt;label&gt;手機電話&lt;Input name="phone" type="tel" required pattern="09[0-9]{8}" inputMode="numeric" defaultValue={student.phone}/&gt;&lt;/label&gt;
+        &lt;label&gt;護理年資&lt;Input name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={value('nursing_years')}/&gt;&lt;/label&gt;
+        &lt;ServiceInstitution hospital={value('hospital')} unit={value('unit')} serviceKind={value('service_kind') || 'hospital'} hospitals={hospitals} loading={loading}/&gt;
+        &lt;label&gt;報考科別&lt;NativeSelect name="examSpecialty" defaultValue={value('exam_specialty')}&gt;&lt;NativeSelectOption value=""&gt;尚未填寫&lt;/NativeSelectOption&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(item =&gt; &lt;NativeSelectOption key={item} value={item}&gt;{item}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;
+        &lt;label&gt;首次報考國家 OSCE&lt;NativeSelect name="firstOsce" defaultValue={student.first_osce == null ? '' : student.first_osce ? 'yes' : 'no'}&gt;&lt;NativeSelectOption value=""&gt;尚未填寫&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="yes"&gt;是&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="no"&gt;否&lt;/NativeSelectOption&gt;&lt;/NativeSelect&gt;&lt;/label&gt;
+        &lt;label&gt;出生年月日&lt;Input name="birthDate" type="date" min="1900-01-01" defaultValue={value('birth_date')}/&gt;&lt;/label&gt;
+      &lt;/div&gt;
+      &lt;p className="form-help"&gt;Email 為唯讀，登入帳號不會因本次編輯而變更。&lt;/p&gt;
+      {(localError || error) &amp;&amp; &lt;p role="alert" className="notice error"&gt;{localError || error}&lt;/p&gt;}
+      &lt;div className="form-actions"&gt;&lt;Button type="submit" className="action"&gt;{busy ? '儲存中…' : '儲存學員資料'}&lt;/Button&gt;&lt;Button type="button" variant="outline" onClick={onClose}&gt;取消&lt;/Button&gt;&lt;/div&gt;
+    &lt;/fieldset&gt;&lt;/form&gt;
+    {loading &amp;&amp; &lt;p role="status"&gt;正在載入醫院名冊…&lt;/p&gt;}
+    {!loading &amp;&amp; hospitals.length === 0 &amp;&amp; &lt;p role="alert" className="notice error"&gt;{localError || '醫院名冊尚未載入，請重新開啟。'}&lt;/p&gt;}
+  &lt;/dialog&gt;;
+}
+</pre></details><h2>components/hospital-picker.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useState } from 'react';
+import { Input } from '@/components/ui/input';
+export type Hospital = { name: string; city: string; level: string };
+export function HospitalPicker({ defaultValue, hospitals, loading }: { defaultValue: string; hospitals: Hospital[]; loading: boolean }) {
+  const [query,setQuery] = useState(defaultValue);
+  const [selected,setSelected] = useState(defaultValue);
+  const options = hospitals.filter(item=&gt;`${item.name}${item.city}${item.level}`.includes(query)).slice(0,8);
+  return &lt;label className="hospital-picker"&gt;服務醫院&lt;Input value={query} onChange={event=&gt;{setQuery(event.target.value);setSelected('');}} placeholder="輸入醫院或縣市關鍵字搜尋" autoComplete="off"/&gt;&lt;input type="hidden" name="hospital" value={selected}/&gt;{loading &amp;&amp; &lt;small&gt;正在載入官方醫院名冊…&lt;/small&gt;}{query &amp;&amp; !selected &amp;&amp; !loading &amp;&amp; &lt;div className="hospital-options"&gt;{options.length ? options.map(item=&gt;&lt;button type="button" key={`${item.city}-${item.name}`} onClick={()=&gt;{setSelected(item.name);setQuery(item.name);}}&gt;{item.name}&lt;small&gt;{item.city} · {item.level}&lt;/small&gt;&lt;/button&gt;) : &lt;p&gt;找不到相符醫院，請調整關鍵字後再試。&lt;/p&gt;}&lt;/div&gt;}{selected &amp;&amp; &lt;small&gt;已選擇：{selected}&lt;/small&gt;}&lt;/label&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { useState } from 'react';
+import { Input } from '@/components/ui/input';
+export type Hospital = { name: string; city: string; level: string };
+export function HospitalPicker({ defaultValue, hospitals, loading }: { defaultValue: string; hospitals: Hospital[]; loading: boolean }) {
+  const [query,setQuery] = useState(defaultValue);
+  const [selected,setSelected] = useState(defaultValue);
+  const options = hospitals.filter(item=&gt;`${item.name}${item.city}${item.level}`.includes(query)).slice(0,8);
+  return &lt;label className="hospital-picker"&gt;服務醫院&lt;Input name="hospitalQuery" value={query} onChange={event=&gt;{setQuery(event.target.value);setSelected('');}} placeholder="輸入醫院或縣市關鍵字搜尋" autoComplete="off"/&gt;&lt;input type="hidden" name="hospital" value={selected}/&gt;{loading &amp;&amp; &lt;small&gt;正在載入官方醫院名冊…&lt;/small&gt;}{query &amp;&amp; !selected &amp;&amp; !loading &amp;&amp; &lt;div className="hospital-options"&gt;{options.length ? options.map(item=&gt;&lt;button type="button" key={`${item.city}-${item.name}`} onClick={()=&gt;{setSelected(item.name);setQuery(item.name);}}&gt;{item.name}&lt;small&gt;{item.city} · {item.level}&lt;/small&gt;&lt;/button&gt;) : &lt;p&gt;找不到相符醫院，請調整關鍵字後再試。&lt;/p&gt;}&lt;/div&gt;}{selected &amp;&amp; &lt;small&gt;已選擇：{selected}&lt;/small&gt;}&lt;/label&gt;;
+}
+</pre></details><h2>app/student/student-dashboard.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { DomainRadar } from '@/components/domain-radar';
+import { rpc } from '@/lib/supabase';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+('use client');
+import { useEffect, useState } from 'react';
+import {
+  formatScore,
+  gradeStatus,
+  maskPhone,
+  type StationDefinition,
+  type Grade,
+  type Threshold,
+} from '@/lib/grading';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+type RecordItem = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  workshopName: string;
+  published: number;
+  archived?: boolean;
+  updatedAt: string | null;
+  grades: (Grade &amp; { key: string; feedback?: string | null })[];
+  thresholds: Threshold[];
+  stations?: StationDefinition[];
+  profile?: { nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
+};
+export default function StudentDashboard() {
+  const [records, setRecords] = useState&lt;RecordItem[] | null&gt;(null),
+    [selected, setSelected] = useState(''),
+    [error, setError] = useState(''),
+    [profileBusy, setProfileBusy] = useState(false),
+    [hospitalError, setHospitalError] = useState(''),
+    [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]),
+    [hospitalLoading, setHospitalLoading] = useState(true);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data', {}, abort.signal)
+      .then((data) =&gt; {
+        setRecords(data.records);
+      })
+      .catch((e) =&gt; {
+        if (e.name !== 'AbortError') setError(e.message);
+      });
+    return () =&gt; abort.abort();
+  }, []);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},abort.signal)
+      .then(data=&gt;setHospitals(data.hospitals))
+      .catch(cause=&gt;{if(cause.name!=='AbortError')setHospitalError('官方醫院名冊暫時無法載入，個人資料暫時無法更新。');})
+      .finally(()=&gt;setHospitalLoading(false));
+    return () =&gt; abort.abort();
+  }, []);
+  const record = records?.find((r) =&gt; r.id === selected) ?? records?.[0];
+  async function saveProfile(form: HTMLFormElement) {
+    const fields = new FormData(form);
+    setProfileBusy(true); setError('');
+    try {
+      const hospital = String(fields.get('hospital') ?? '');
+      if (!hospitals.some((item) =&gt; item.name === hospital)) throw new Error('請由政府醫院名冊的搜尋結果選擇服務醫院全名。');
+      await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit') ?? ''), examSpecialty: String(fields.get('examSpecialty') ?? ''), firstOsce: fields.get('firstOsce') === 'yes', birthDate: String(fields.get('birthDate') ?? '') } });
+      const data = await rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data'); setRecords(data.records);
+    } catch (cause) { setError((cause as Error).message); } finally { setProfileBusy(false); }
+  }
+  return (
+    &lt;&gt;
+      &lt;div className="dashboard-title"&gt;
+        &lt;div&gt;
+          &lt;h1&gt;我的 OSCE 成績&lt;/h1&gt;
+          &lt;p&gt;
+            {record
+              ? `${record.name}，回顧每一次練習，整理下一步的方向。`
+              : '回顧每一次練習，整理下一步的方向。'}
+          &lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      {hospitalError &amp;&amp; &lt;p role="alert" className="notice"&gt;{hospitalError}&lt;/p&gt;}
+      {error ? (
+        &lt;section className="notice error" role="alert"&gt;
+          &lt;p&gt;{error}&lt;/p&gt;
+          &lt;Button className="action" onClick={() =&gt; location.reload()}&gt;
+            重新載入
+          &lt;/Button&gt;
+        &lt;/section&gt;
+      ) : !records ? (
+        &lt;p className="empty-panel" role="status"&gt;
+          正在載入你的學習紀錄…
+        &lt;/p&gt;
+      ) : !record ? (
+        &lt;section className="empty-panel"&gt;
+          &lt;span className="section-label"&gt;YOUR RECORDS&lt;/span&gt;
+          &lt;h2&gt;目前尚無工作坊紀錄&lt;/h2&gt;
+          &lt;p&gt;
+            請確認登入 Email
+            與老師建立的名冊一致。若已參加工作坊，請洽課程老師協助確認。
+          &lt;/p&gt;
+        &lt;/section&gt;
+      ) : (
+        &lt;&gt;
+          &lt;div className="workshop-toolbar"&gt;
+            &lt;label&gt;
+              工作坊梯次
+              &lt;NativeSelect
+                value={record.id}
+                onChange={(e) =&gt; setSelected(e.target.value)}
+              &gt;
+                {records.map((r) =&gt; (
+                  &lt;NativeSelectOption key={r.id} value={r.id}&gt;
+                    {r.workshopName}
+                  &lt;/NativeSelectOption&gt;
+                ))}
+              &lt;/NativeSelect&gt;
+            &lt;/label&gt;
+            &lt;span className="identity-pill"&gt;手機電話 {maskPhone(record.phone)}&lt;/span&gt;
+          &lt;/div&gt;
+          {!record.archived &amp;&amp; (!record.profile?.hospital || record.profile.firstOsce === null) ? &lt;section className="data-panel student-profile"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;FIRST LOGIN&lt;/span&gt;&lt;h2&gt;完成個人資料&lt;/h2&gt;&lt;p className="form-help"&gt;姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。服務醫院請由政府名冊搜尋並點選全名。&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;form onSubmit={(event) =&gt; { event.preventDefault(); saveProfile(event.currentTarget); }}&gt;&lt;fieldset disabled={profileBusy || hospitalLoading || !!hospitalError}&gt;&lt;div className="profile-grid"&gt;&lt;label&gt;姓名&lt;Input value={record.name} disabled /&gt;&lt;/label&gt;&lt;label&gt;Email&lt;Input value={record.email ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input value={record.phone ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;護理年資（年）&lt;Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /&gt;&lt;/label&gt;&lt;HospitalPicker defaultValue={record.profile?.hospital ?? ''} hospitals={hospitals} loading={hospitalLoading} /&gt;&lt;label&gt;服務單位&lt;Input name="unit" required maxLength={100} defaultValue={record.profile?.unit ?? ''} /&gt;&lt;/label&gt;&lt;label&gt;報考科別&lt;NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) =&gt; &lt;NativeSelectOption value={item} key={item}&gt;{item}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;是否首次報考國家 OSCE&lt;NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="yes"&gt;是&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="no"&gt;否&lt;/NativeSelectOption&gt;&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;出生年月日&lt;Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /&gt;&lt;/label&gt;&lt;/div&gt;&lt;Button className="action" type="submit"&gt;{profileBusy ? '儲存中…' : '儲存個人資料'}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;&lt;/section&gt; : &lt;section className="profile-summary"&gt;&lt;span&gt;{record.archived ? '已封存梯次，保留當時背景資料' : '個人資料已完成'}&lt;/span&gt;&lt;strong&gt;{record.profile?.examSpecialty ? `${record.profile.examSpecialty}專科護理師` : '背景資料未完整登錄'}&lt;/strong&gt;&lt;p&gt;{record.profile?.hospital || '未登錄醫院'} · {record.profile?.unit || '未登錄單位'} · 護理年資 {record.profile?.nursingYears ?? '未登錄'} 年&lt;/p&gt;&lt;/section&gt;}
+          {!record.published ? (
+            &lt;section className="empty-panel"&gt;
+              &lt;h2&gt;本梯次成績尚未公布&lt;/h2&gt;
+              &lt;p&gt;老師確認成績後，將於此頁開放查詢，請留意課程通知。&lt;/p&gt;
+            &lt;/section&gt;
+          ) : (
+            &lt;&gt;
+              &lt;div className="student-summary"&gt;
+                &lt;div&gt;
+                  &lt;span&gt;評量紀錄&lt;/span&gt;
+                  &lt;strong&gt;
+                    {record.grades.filter((g) =&gt; g.score !== null).length}
+                    &lt;small&gt; / {record.stations?.length ?? 0} 題已登錄&lt;/small&gt;
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;div&gt;
+                  &lt;span&gt;各題及格標準&lt;/span&gt;
+                  &lt;strong&gt;
+                    邊緣及格分數
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;p&gt;
+                  各題得分達該題邊緣及格分數即為及格，未達者以紅字顯示。
+                  &lt;br /&gt;
+                  邊緣及格分數為各題 Rating＝3 學員的平均分數；缺少資料時尚無法判定。
+                &lt;/p&gt;
+              &lt;/div&gt;
+              &lt;section className="borderline-explainer" aria-label="邊緣及格分數說明"&gt;
+                &lt;div&gt;
+                  &lt;span className="section-label"&gt;ABOUT BORDERLINE SCORE&lt;/span&gt;
+                  &lt;h2&gt;什麼是邊緣及格分數？&lt;/h2&gt;
+                &lt;/div&gt;
+                &lt;p&gt;每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。&lt;strong className="borderline-standard"&gt;Rating＝3 代表考官依你的整體表現判斷，認為你已達國家考試的及格標準。&lt;/strong&gt; 系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。&lt;/p&gt;
+                &lt;p&gt;&lt;strong&gt;它用來幫助你理解自己的表現與考官判斷的基準。&lt;/strong&gt; 本系統以每題的邊緣及格分數判斷及格；得分等於或高於該分數即為及格。&lt;/p&gt;
+              &lt;/section&gt;
+              &lt;section className="day-section"&gt;
+                &lt;div className="day-heading"&gt;&lt;span&gt;OSCE RESULTS&lt;/span&gt;&lt;h2&gt;已公布的 OSCE 成績&lt;/h2&gt;&lt;/div&gt;
+                &lt;div className="student-score-grid"&gt;
+                    {(record.stations ?? []).map((station) =&gt; {
+                      const g = record.grades.find((g) =&gt; g.key === station.key),
+                        score = g?.score ?? null,
+                        t = record.thresholds.find((t) =&gt; t.key === station.key);
+                      const status = gradeStatus(score, t?.value ?? null);
+                      return (
+                        &lt;article className="student-score-card" key={station.key}&gt;
+                          &lt;div className="score-card-heading"&gt;
+                            &lt;div&gt;&lt;h3&gt;{station.title}&lt;/h3&gt;
+                            {station.testDate &amp;&amp; &lt;p className="score-test-date"&gt;測驗日期 &lt;time dateTime={station.testDate}&gt;{station.testDate}&lt;/time&gt;&lt;/p&gt;}&lt;/div&gt;
+                            &lt;span
+                              className={`result-badge ${status === '及格' ? 'pass' : status === '未達及格' ? 'below' : 'pending'}`}
+                            &gt;
+                              {status}
+                            &lt;/span&gt;
+                          &lt;/div&gt;
+                          &lt;section className="score-question-content" aria-label="考題內容"&gt;
+                            &lt;h4&gt;考題內容&lt;/h4&gt;
+                            &lt;dl className="score-case-details"&gt;
+                              {station.complaint &amp;&amp; &lt;div&gt;&lt;dt&gt;個案主訴&lt;/dt&gt;&lt;dd&gt;{station.complaint}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.diagnosis &amp;&amp; &lt;div&gt;&lt;dt&gt;最終診斷&lt;/dt&gt;&lt;dd&gt;{station.diagnosis}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.prompt &amp;&amp; &lt;div&gt;&lt;dt&gt;命題內容摘要&lt;/dt&gt;&lt;dd&gt;{station.prompt}&lt;/dd&gt;&lt;/div&gt;}
+                            &lt;/dl&gt;
+                          &lt;/section&gt;
+                          &lt;div className="score-performance-grid"&gt;
+                            &lt;section className="score-overview" aria-label="成績摘要"&gt;
+                              &lt;div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}&gt;
+                                {formatScore(score)}
+                                &lt;span&gt; / 100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;div
+                                className="score-track"
+                                aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
+                              &gt;
+                                &lt;div
+                                  className="score-fill"
+                                  style={{ width: `${score ?? 0}%` }}
+                                /&gt;
+                                {t?.value !== null &amp;&amp; t?.value !== undefined &amp;&amp; (
+                                  &lt;i
+                                    className="border-marker"
+                                    style={{ left: `${t.value}%` }}
+                                  /&gt;
+                                )}
+                              &lt;/div&gt;
+                              &lt;div className="track-labels"&gt;
+                                &lt;span&gt;0&lt;/span&gt;
+                                &lt;span&gt;100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;dl className="grade-details"&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;邊緣及格分數&lt;/dt&gt;
+                                  &lt;dd&gt;
+                                    {t?.value === null || t?.value === undefined
+                                      ? '尚無法計算'
+                                      : `${formatScore(t.value)} 分`}
+                                  &lt;/dd&gt;
+                                &lt;/div&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;Global Rating&lt;/dt&gt;
+                                  &lt;dd&gt;{g?.rating ?? '—'} / 5&lt;/dd&gt;
+                                &lt;/div&gt;
+                              &lt;/dl&gt;
+                            &lt;/section&gt;
+                            &lt;DomainRadar title="五大面向表現" scores={g?.domains} maximum={station.domainMax}/&gt;
+                          &lt;/div&gt;
+                          {g?.feedback &amp;&amp; (
+                            &lt;div className="qualitative-feedback"&gt;
+                              &lt;strong&gt;老師回饋&lt;/strong&gt;
+                              &lt;p&gt;{g.feedback}&lt;/p&gt;
+                            &lt;/div&gt;
+                          )}
+                          &lt;p className="score-note"&gt;
+                            {t?.count
+                              ? `邊緣分數採 ${t.count} 位 Rating＝3 學員的該題分數平均。`
+                              : '本題尚無 Rating＝3 且已登錄分數的資料。'}
+                          &lt;/p&gt;
+                        &lt;/article&gt;
+                      );
+                    })}
+                &lt;/div&gt;
+              &lt;/section&gt;
+              &lt;div className="score-legend"&gt;
+                &lt;span&gt;
+                  &lt;i className="legend-border" /&gt;
+                  邊緣及格線
+                &lt;/span&gt;
+              &lt;/div&gt;
+              &lt;p className="portal-note"&gt;
+                成績更新：
+                {record.updatedAt
+                  ? new Intl.DateTimeFormat('zh-TW', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                      timeZone: 'Asia/Taipei',
+                    }).format(new Date(record.updatedAt))
+                  : '—'}
+                。本頁為個人工作坊測驗紀錄，並非國家考試成績。顯示數值最多取至小數點後兩位。
+              &lt;/p&gt;
+            &lt;/&gt;
+          )}
+        &lt;/&gt;
+      )}
+    &lt;/&gt;
+  );
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { ServiceInstitution, serviceInstitutionValues } from '@/components/service-institution';
+import { DomainRadar } from '@/components/domain-radar';
+import { rpc } from '@/lib/supabase';
+import { type Hospital } from '@/components/hospital-picker';
+('use client');
+import { useEffect, useState } from 'react';
+import {
+  formatScore,
+  gradeStatus,
+  maskPhone,
+  type StationDefinition,
+  type Grade,
+  type Threshold,
+} from '@/lib/grading';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+type RecordItem = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  workshopName: string;
+  published: number;
+  archived?: boolean;
+  updatedAt: string | null;
+  grades: (Grade &amp; { key: string; feedback?: string | null })[];
+  thresholds: Threshold[];
+  stations?: StationDefinition[];
+  profile?: { serviceKind?: string; nursingYears: number | null; hospital: string; unit: string; examSpecialty: string; firstOsce: boolean | null; birthDate: string };
+};
+export default function StudentDashboard() {
+  const [records, setRecords] = useState&lt;RecordItem[] | null&gt;(null),
+    [selected, setSelected] = useState(''),
+    [error, setError] = useState(''),
+    [profileBusy, setProfileBusy] = useState(false),
+    [hospitalError, setHospitalError] = useState(''),
+    [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]),
+    [hospitalLoading, setHospitalLoading] = useState(true);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data', {}, abort.signal)
+      .then((data) =&gt; {
+        setRecords(data.records);
+      })
+      .catch((e) =&gt; {
+        if (e.name !== 'AbortError') setError(e.message);
+      });
+    return () =&gt; abort.abort();
+  }, []);
+  useEffect(() =&gt; {
+    const abort = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},abort.signal)
+      .then(data=&gt;setHospitals(data.hospitals))
+      .catch(cause=&gt;{if(cause.name!=='AbortError')setHospitalError('醫院名冊暫時無法載入，可選擇清單中找不到並自行填寫。');})
+      .finally(()=&gt;setHospitalLoading(false));
+    return () =&gt; abort.abort();
+  }, []);
+  const record = records?.find((r) =&gt; r.id === selected) ?? records?.[0];
+  async function saveProfile(form: HTMLFormElement) {
+    const fields = new FormData(form);
+    setProfileBusy(true); setError('');
+    try {
+      const institution = serviceInstitutionValues(fields, hospitals);
+      await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), ...institution, examSpecialty: String(fields.get('examSpecialty') ?? ''), firstOsce: fields.get('firstOsce') === 'yes', birthDate: String(fields.get('birthDate') ?? '') } });
+      const data = await rpc&lt;{ records: RecordItem[] }&gt;('nptc_student_data'); setRecords(data.records);
+    } catch (cause) { setError((cause as Error).message); } finally { setProfileBusy(false); }
+  }
+  return (
+    &lt;&gt;
+      &lt;div className="dashboard-title"&gt;
+        &lt;div&gt;
+          &lt;h1&gt;我的 OSCE 成績&lt;/h1&gt;
+          &lt;p&gt;
+            {record
+              ? `${record.name}，回顧每一次練習，整理下一步的方向。`
+              : '回顧每一次練習，整理下一步的方向。'}
+          &lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      {hospitalError &amp;&amp; &lt;p role="alert" className="notice"&gt;{hospitalError}&lt;/p&gt;}
+      {error ? (
+        &lt;section className="notice error" role="alert"&gt;
+          &lt;p&gt;{error}&lt;/p&gt;
+          &lt;Button className="action" onClick={() =&gt; location.reload()}&gt;
+            重新載入
+          &lt;/Button&gt;
+        &lt;/section&gt;
+      ) : !records ? (
+        &lt;p className="empty-panel" role="status"&gt;
+          正在載入你的學習紀錄…
+        &lt;/p&gt;
+      ) : !record ? (
+        &lt;section className="empty-panel"&gt;
+          &lt;span className="section-label"&gt;YOUR RECORDS&lt;/span&gt;
+          &lt;h2&gt;目前尚無工作坊紀錄&lt;/h2&gt;
+          &lt;p&gt;
+            請確認登入 Email
+            與老師建立的名冊一致。若已參加工作坊，請洽課程老師協助確認。
+          &lt;/p&gt;
+        &lt;/section&gt;
+      ) : (
+        &lt;&gt;
+          &lt;div className="workshop-toolbar"&gt;
+            &lt;label&gt;
+              工作坊梯次
+              &lt;NativeSelect
+                value={record.id}
+                onChange={(e) =&gt; setSelected(e.target.value)}
+              &gt;
+                {records.map((r) =&gt; (
+                  &lt;NativeSelectOption key={r.id} value={r.id}&gt;
+                    {r.workshopName}
+                  &lt;/NativeSelectOption&gt;
+                ))}
+              &lt;/NativeSelect&gt;
+            &lt;/label&gt;
+            &lt;span className="identity-pill"&gt;手機電話 {maskPhone(record.phone)}&lt;/span&gt;
+          &lt;/div&gt;
+          {!record.archived &amp;&amp; (!record.profile?.hospital || record.profile.firstOsce === null) ? &lt;section className="data-panel student-profile"&gt;&lt;div className="panel-heading"&gt;&lt;div&gt;&lt;span className="section-label"&gt;FIRST LOGIN&lt;/span&gt;&lt;h2&gt;完成個人資料&lt;/h2&gt;&lt;p className="form-help"&gt;姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。可搜尋服務醫院、自行填寫機構，或勾選待業中。&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;form onSubmit={(event) =&gt; { event.preventDefault(); saveProfile(event.currentTarget); }}&gt;&lt;fieldset disabled={profileBusy || hospitalLoading}&gt;&lt;div className="profile-grid"&gt;&lt;label&gt;姓名&lt;Input value={record.name} disabled /&gt;&lt;/label&gt;&lt;label&gt;Email&lt;Input value={record.email ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input value={record.phone ?? ''} disabled /&gt;&lt;/label&gt;&lt;label&gt;護理年資（年）&lt;Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /&gt;&lt;/label&gt;&lt;ServiceInstitution hospital={record.profile?.hospital ?? ''} unit={record.profile?.unit ?? ''} serviceKind={record.profile?.serviceKind} hospitals={hospitals} loading={hospitalLoading}/&gt;&lt;label&gt;報考科別&lt;NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) =&gt; &lt;NativeSelectOption value={item} key={item}&gt;{item}&lt;/NativeSelectOption&gt;)}&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;是否首次報考國家 OSCE&lt;NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}&gt;&lt;NativeSelectOption value=""&gt;請選擇&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="yes"&gt;是&lt;/NativeSelectOption&gt;&lt;NativeSelectOption value="no"&gt;否&lt;/NativeSelectOption&gt;&lt;/NativeSelect&gt;&lt;/label&gt;&lt;label&gt;出生年月日&lt;Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /&gt;&lt;/label&gt;&lt;/div&gt;&lt;Button className="action" type="submit"&gt;{profileBusy ? '儲存中…' : '儲存個人資料'}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;&lt;/section&gt; : &lt;section className="profile-summary"&gt;&lt;span&gt;{record.archived ? '已封存梯次，保留當時背景資料' : '個人資料已完成'}&lt;/span&gt;&lt;strong&gt;{record.profile?.examSpecialty ? `${record.profile.examSpecialty}專科護理師` : '背景資料未完整登錄'}&lt;/strong&gt;&lt;p&gt;{record.profile?.hospital || '未登錄醫院'} · {record.profile?.unit || '未登錄單位'} · 護理年資 {record.profile?.nursingYears ?? '未登錄'} 年&lt;/p&gt;&lt;/section&gt;}
+          {!record.published ? (
+            &lt;section className="empty-panel"&gt;
+              &lt;h2&gt;本梯次成績尚未公布&lt;/h2&gt;
+              &lt;p&gt;老師確認成績後，將於此頁開放查詢，請留意課程通知。&lt;/p&gt;
+            &lt;/section&gt;
+          ) : (
+            &lt;&gt;
+              &lt;div className="student-summary"&gt;
+                &lt;div&gt;
+                  &lt;span&gt;評量紀錄&lt;/span&gt;
+                  &lt;strong&gt;
+                    {record.grades.filter((g) =&gt; g.score !== null).length}
+                    &lt;small&gt; / {record.stations?.length ?? 0} 題已登錄&lt;/small&gt;
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;div&gt;
+                  &lt;span&gt;各題及格標準&lt;/span&gt;
+                  &lt;strong&gt;
+                    邊緣及格分數
+                  &lt;/strong&gt;
+                &lt;/div&gt;
+                &lt;p&gt;
+                  各題得分達該題邊緣及格分數即為及格，未達者以紅字顯示。
+                  &lt;br /&gt;
+                  邊緣及格分數為各題 Rating＝3 學員的平均分數；缺少資料時尚無法判定。
+                &lt;/p&gt;
+              &lt;/div&gt;
+              &lt;section className="borderline-explainer" aria-label="邊緣及格分數說明"&gt;
+                &lt;div&gt;
+                  &lt;span className="section-label"&gt;ABOUT BORDERLINE SCORE&lt;/span&gt;
+                  &lt;h2&gt;什麼是邊緣及格分數？&lt;/h2&gt;
+                &lt;/div&gt;
+                &lt;p&gt;每一題 OSCE 評量後，考官會給予 Global Rating（1 至 5 分）。&lt;strong className="borderline-standard"&gt;Rating＝3 代表考官依你的整體表現判斷，認為你已達國家考試的及格標準。&lt;/strong&gt; 系統會計算該題所有 Rating＝3 學員的平均得分，作為該題的邊緣及格分數。&lt;/p&gt;
+                &lt;p&gt;&lt;strong&gt;它用來幫助你理解自己的表現與考官判斷的基準。&lt;/strong&gt; 本系統以每題的邊緣及格分數判斷及格；得分等於或高於該分數即為及格。&lt;/p&gt;
+              &lt;/section&gt;
+              &lt;section className="day-section"&gt;
+                &lt;div className="day-heading"&gt;&lt;span&gt;OSCE RESULTS&lt;/span&gt;&lt;h2&gt;已公布的 OSCE 成績&lt;/h2&gt;&lt;/div&gt;
+                &lt;div className="student-score-grid"&gt;
+                    {(record.stations ?? []).map((station) =&gt; {
+                      const g = record.grades.find((g) =&gt; g.key === station.key),
+                        score = g?.score ?? null,
+                        t = record.thresholds.find((t) =&gt; t.key === station.key);
+                      const status = gradeStatus(score, t?.value ?? null);
+                      return (
+                        &lt;article className="student-score-card" key={station.key}&gt;
+                          &lt;div className="score-card-heading"&gt;
+                            &lt;div&gt;&lt;h3&gt;{station.title}&lt;/h3&gt;
+                            {station.testDate &amp;&amp; &lt;p className="score-test-date"&gt;測驗日期 &lt;time dateTime={station.testDate}&gt;{station.testDate}&lt;/time&gt;&lt;/p&gt;}&lt;/div&gt;
+                            &lt;span
+                              className={`result-badge ${status === '及格' ? 'pass' : status === '未達及格' ? 'below' : 'pending'}`}
+                            &gt;
+                              {status}
+                            &lt;/span&gt;
+                          &lt;/div&gt;
+                          &lt;section className="score-question-content" aria-label="考題內容"&gt;
+                            &lt;h4&gt;考題內容&lt;/h4&gt;
+                            &lt;dl className="score-case-details"&gt;
+                              {station.complaint &amp;&amp; &lt;div&gt;&lt;dt&gt;個案主訴&lt;/dt&gt;&lt;dd&gt;{station.complaint}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.diagnosis &amp;&amp; &lt;div&gt;&lt;dt&gt;最終診斷&lt;/dt&gt;&lt;dd&gt;{station.diagnosis}&lt;/dd&gt;&lt;/div&gt;}
+                              {station.prompt &amp;&amp; &lt;div&gt;&lt;dt&gt;命題內容摘要&lt;/dt&gt;&lt;dd&gt;{station.prompt}&lt;/dd&gt;&lt;/div&gt;}
+                            &lt;/dl&gt;
+                          &lt;/section&gt;
+                          &lt;div className="score-performance-grid"&gt;
+                            &lt;section className="score-overview" aria-label="成績摘要"&gt;
+                              &lt;div className={`personal-score${status === '未達及格' ? ' score-failed' : ''}`}&gt;
+                                {formatScore(score)}
+                                &lt;span&gt; / 100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;div
+                                className="score-track"
+                                aria-label={`個人成績 ${formatScore(score)} 分，邊緣及格分數 ${formatScore(t?.value ?? null)}`}
+                              &gt;
+                                &lt;div
+                                  className="score-fill"
+                                  style={{ width: `${score ?? 0}%` }}
+                                /&gt;
+                                {t?.value !== null &amp;&amp; t?.value !== undefined &amp;&amp; (
+                                  &lt;i
+                                    className="border-marker"
+                                    style={{ left: `${t.value}%` }}
+                                  /&gt;
+                                )}
+                              &lt;/div&gt;
+                              &lt;div className="track-labels"&gt;
+                                &lt;span&gt;0&lt;/span&gt;
+                                &lt;span&gt;100&lt;/span&gt;
+                              &lt;/div&gt;
+                              &lt;dl className="grade-details"&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;邊緣及格分數&lt;/dt&gt;
+                                  &lt;dd&gt;
+                                    {t?.value === null || t?.value === undefined
+                                      ? '尚無法計算'
+                                      : `${formatScore(t.value)} 分`}
+                                  &lt;/dd&gt;
+                                &lt;/div&gt;
+                                &lt;div&gt;
+                                  &lt;dt&gt;Global Rating&lt;/dt&gt;
+                                  &lt;dd&gt;{g?.rating ?? '—'} / 5&lt;/dd&gt;
+                                &lt;/div&gt;
+                              &lt;/dl&gt;
+                            &lt;/section&gt;
+                            &lt;DomainRadar title="五大面向表現" scores={g?.domains} maximum={station.domainMax}/&gt;
+                          &lt;/div&gt;
+                          {g?.feedback &amp;&amp; (
+                            &lt;div className="qualitative-feedback"&gt;
+                              &lt;strong&gt;老師回饋&lt;/strong&gt;
+                              &lt;p&gt;{g.feedback}&lt;/p&gt;
+                            &lt;/div&gt;
+                          )}
+                          &lt;p className="score-note"&gt;
+                            {t?.count
+                              ? `邊緣分數採 ${t.count} 位 Rating＝3 學員的該題分數平均。`
+                              : '本題尚無 Rating＝3 且已登錄分數的資料。'}
+                          &lt;/p&gt;
+                        &lt;/article&gt;
+                      );
+                    })}
+                &lt;/div&gt;
+              &lt;/section&gt;
+              &lt;div className="score-legend"&gt;
+                &lt;span&gt;
+                  &lt;i className="legend-border" /&gt;
+                  邊緣及格線
+                &lt;/span&gt;
+              &lt;/div&gt;
+              &lt;p className="portal-note"&gt;
+                成績更新：
+                {record.updatedAt
+                  ? new Intl.DateTimeFormat('zh-TW', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                      timeZone: 'Asia/Taipei',
+                    }).format(new Date(record.updatedAt))
+                  : '—'}
+                。本頁為個人工作坊測驗紀錄，並非國家考試成績。顯示數值最多取至小數點後兩位。
+              &lt;/p&gt;
+            &lt;/&gt;
+          )}
+        &lt;/&gt;
+      )}
+    &lt;/&gt;
+  );
+}
+</pre></details><h2>supabase/upgrade-project-consistency.sql</h2><details><summary>修改前完整檔案</summary><pre>-- 現行版本 2026100701。適用已完成五面向、學員啟用、管理員角色與敏感操作的環境。
+-- 新安裝使用 install.sql；請整份執行，可重跑。醫院種子由 scripts/build-supabase.mjs 產生。
+begin;
+do $$ begin
+ if to_regprocedure('nptc_private.student_identity()') is null
+ or to_regprocedure('nptc_private.require_fresh_admin_password()') is null
+ or not exists(select 1 from information_schema.columns where table_schema='nptc_private' and table_name='station_grades' and column_name='domain_scores') then
+  raise exception '前置升級未完成，請依 README 的既有環境升級順序操作。';
+ end if;
+end; $$;
+
+create table if not exists nptc_private.schema_migrations(version bigint primary key, installed_at timestamptz not null default now());
+alter table nptc_private.schema_migrations enable row level security;
+alter table nptc_private.workshops add column if not exists stations_revision integer not null default 0 check(stations_revision&gt;=0);
+create table if not exists nptc_private.hospital_directory(name text primary key, city text not null, level text not null);
+alter table nptc_private.hospital_directory enable row level security;
+create table if not exists nptc_private.workshop_create_requests(
+ admin_id uuid not null, request_id uuid not null, name text not null, workshop_id uuid not null,
+ primary key(admin_id,request_id));
+alter table nptc_private.workshop_create_requests enable row level security;
+create table if not exists nptc_private.student_email_changes(
+ id uuid primary key default gen_random_uuid(),user_id uuid not null,previous_email text not null,new_email text not null,
+ changed_at timestamptz not null default now());
+alter table nptc_private.student_email_changes enable row level security;
+revoke all on all tables in schema nptc_private from public,anon,authenticated;
+
+-- BEGIN HOSPITAL DIRECTORY
+delete from nptc_private.hospital_directory;
+insert into nptc_private.hospital_directory(name,city,level) values
+('三軍總醫院松山分院附設民眾診療服務處','臺北市','醫院評鑑合格（區域醫院）'),
+('三軍總醫院附設民眾診療服務處及其汀州院區','臺北市','醫院評鑑優等（醫學中心）'),
+('三軍總醫院澎湖分院附設民眾診療服務處','澎湖縣','醫院評鑑合格（地區醫院）'),
+('大千綜合醫院','苗栗縣','醫院評鑑合格（地區醫院）'),
+('中山醫學大學附設醫院','臺中市','醫院評鑑優等（醫學中心）'),
+('中國醫藥大學北港附設醫院','雲林縣','醫院評鑑合格（區域醫院）'),
+('中國醫藥大學附設醫院','臺中市','醫院評鑑優等（醫學中心）'),
+('中國醫藥大學新竹附設醫院','新竹縣','醫院評鑑合格（地區醫院）'),
+('仁愛醫療財團法人大里仁愛醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('天主教中華聖母修女會醫療財團法人天主教聖馬爾定醫院及其民權院區','嘉義市','醫院評鑑合格（區域醫院）'),
+('天主教仁慈醫療財團法人仁慈醫院','新竹縣','醫院評鑑合格（地區醫院）'),
+('天主教若瑟醫療財團法人若瑟醫院','雲林縣','醫院評鑑合格（地區醫院）'),
+('天主教耕莘醫療財團法人永和耕莘醫院','新北市','醫院評鑑合格（地區醫院）'),
+('天主教耕莘醫療財團法人耕莘醫院','新北市','醫院評鑑合格（區域醫院）'),
+('天主教耕莘醫療財團法人耕莘醫院安康院區','新北市','醫院評鑑合格（地區醫院）'),
+('天主教聖功醫療財團法人聖功醫院','高雄市','醫院評鑑合格（地區醫院）'),
+('天主教靈醫會醫療財團法人羅東聖母醫院','宜蘭縣','醫院評鑑合格（區域醫院）'),
+('天成醫院','桃園市','醫院評鑑合格（地區醫院）'),
+('天成醫療社團法人天晟醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('台南市立醫院(委託秀傳醫療社團法人經營)','臺南市','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會馬偕醫療財團法人台東馬偕紀念醫院','臺東縣','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會馬偕醫療財團法人馬偕紀念醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('台灣基督長老教會馬偕醫療財團法人淡水馬偕紀念醫院','新北市','醫院評鑑優等（醫學中心）'),
+('台灣基督長老教會馬偕醫療財團法人新竹馬偕紀念醫院','新竹市','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會新樓醫療財團法人台南新樓醫院','臺南市','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會新樓醫療財團法人麻豆新樓醫院','臺南市','醫院評鑑合格（地區醫院）'),
+('光田醫療社團法人光田綜合醫院及其大甲院區','臺中市','醫院評鑑合格（區域醫院）'),
+('行天宮醫療志業醫療財團法人恩主公醫院','新北市','醫院評鑑合格（區域醫院）'),
+('西園醫療社團法人西園醫院','臺北市','醫院評鑑合格（地區醫院）'),
+('佛教慈濟醫療財團法人大林慈濟醫院','嘉義縣','醫院評鑑合格（區域醫院－準醫學中心）'),
+('佛教慈濟醫療財團法人台中慈濟醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('佛教慈濟醫療財團法人台北慈濟醫院','新北市','醫院評鑑優等（醫學中心）'),
+('佛教慈濟醫療財團法人花蓮慈濟醫院','花蓮縣','醫院評鑑優等（醫學中心）'),
+('李綜合醫療社團法人大甲李綜合醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('李綜合醫療社團法人苑裡李綜合醫院','苗栗縣','醫院評鑑合格（地區醫院）'),
+('沙爾德聖保祿修女會醫療財團法人聖保祿醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('秀傳醫療社團法人秀傳紀念醫院','彰化縣','醫院評鑑合格（區域醫院）'),
+('秀傳醫療財團法人彰濱秀傳紀念醫院','彰化縣','醫院評鑑合格（區域醫院）'),
+('阮綜合醫療社團法人阮綜合醫院','高雄市','醫院評鑑合格（區域醫院）'),
+('亞洲大學附屬醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('奇美醫療財團法人佳里奇美醫院','臺南市','醫院評鑑合格（地區醫院）'),
+('奇美醫療財團法人奇美醫院及其樹林院區','臺南市','醫院評鑑優等（醫學中心）'),
+('奇美醫療財團法人柳營奇美醫院','臺南市','醫院評鑑合格（區域醫院）'),
+('怡仁綜合醫院','桃園市','醫院評鑑合格（地區醫院）'),
+('東元醫療社團法人東元綜合醫院','新竹縣','醫院評鑑合格（區域醫院）'),
+('東基醫療財團法人台東基督教醫院','臺東縣','醫院評鑑合格（地區醫院）'),
+('林新醫療社團法人林新醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('林新醫療社團法人烏日林新醫院','臺中市','醫院評鑑合格（地區醫院）'),
+('長庚醫療財團法人台北長庚紀念醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('長庚醫療財團法人林口長庚紀念醫院','桃園市','醫院評鑑優等（醫學中心）'),
+('長庚醫療財團法人桃園長庚紀念醫院及其長青院區','桃園市','醫院評鑑合格（地區醫院）'),
+('長庚醫療財團法人高雄長庚紀念醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('長庚醫療財團法人基隆長庚紀念醫院及其情人湖院區','基隆市','醫院評鑑合格（區域醫院）'),
+('長庚醫療財團法人嘉義長庚紀念醫院','嘉義縣','醫院評鑑合格（區域醫院）'),
+('屏東榮民總醫院','屏東縣','醫院評鑑合格（地區醫院）'),
+('屏東榮民總醫院龍泉分院','屏東縣','醫院評鑑合格（地區醫院）'),
+('屏基醫療財團法人屏東基督教醫院及其瑞光院區','屏東縣','醫院評鑑合格（區域醫院）'),
+('為恭醫療財團法人為恭紀念醫院及其東興院區','苗栗縣','醫院評鑑合格（區域醫院）'),
+('埔基醫療財團法人埔里基督教醫院','南投縣','醫院評鑑合格（區域醫院）'),
+('振興醫療財團法人振興醫院','臺北市','醫院評鑑合格（區域醫院）'),
+('財團法人私立高雄醫學大學附設中和紀念醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('高雄市立小港醫院（委託財團法人私立高雄醫學大學經營）','高雄市','醫院評鑑合格（區域醫院）'),
+('高雄市立鳳山醫院（委託長庚醫療財團法人經營）','高雄市','醫院評鑑合格（地區醫院）'),
+('高雄市立聯合醫院','高雄市','醫院評鑑合格（區域醫院）'),
+('高雄榮民總醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('高雄榮民總醫院臺南分院','臺南市','醫院評鑑合格（地區醫院）'),
+('健仁醫院','高雄市','醫院評鑑合格（地區醫院）'),
+('國立台灣大學醫學院附設醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('國立成功大學醫學院附設醫院','臺南市','醫院評鑑優等（醫學中心）'),
+('國立成功大學醫學院附設醫院斗六分院','雲林縣','醫院評鑑合格（地區醫院）'),
+('國立陽明交通大學附設醫院及其新民院區','宜蘭縣','醫院評鑑合格（區域醫院）'),
+('國立臺灣大學醫學院附設醫院雲林分院及其虎尾院區','雲林縣','醫院評鑑合格（區域醫院－準醫學中心）'),
+('國立臺灣大學醫學院附設醫院新竹臺大分院生醫醫院及其竹東院區','新竹縣','醫院評鑑合格（區域醫院）'),
+('國立臺灣大學醫學院附設醫院新竹臺大分院新竹醫院','新竹市','醫院評鑑優等（醫學中心）'),
+('國立臺灣大學醫學院附設醫院癌醫中心分院','臺北市','醫院評鑑合格（區域醫院）'),
+('國軍左營總醫院附設民眾診療服務處','高雄市','醫院評鑑合格（區域醫院）'),
+('國軍花蓮總醫院附設民眾診療服務處','花蓮縣','醫院評鑑合格（區域醫院）'),
+('國軍桃園總醫院附設民眾診療服務處','桃園市','醫院評鑑合格（區域醫院）'),
+('國軍高雄總醫院附設民眾診療服務處','高雄市','醫院評鑑合格（區域醫院）'),
+('國軍臺中總醫院附設民眾診療服務處','臺中市','醫院評鑑合格（區域醫院）'),
+('國泰醫療財團法人汐止國泰綜合醫院','新北市','醫院評鑑合格（區域醫院）'),
+('國泰醫療財團法人國泰綜合醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('國泰醫療財團法人新竹國泰綜合醫院','新竹市','醫院評鑑合格（地區醫院）'),
+('基督復臨安息日會醫療財團法人臺安醫院','臺北市','醫院評鑑合格（區域醫院）'),
+('敏盛綜合醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('郭綜合醫院','臺南市','醫院評鑑合格（地區醫院）'),
+('博仁綜合醫院','臺北市','醫院評鑑合格（地區醫院）'),
+('童綜合醫療社團法人童綜合醫院及其沙鹿院區','臺中市','醫院評鑑合格（區域醫院）'),
+('新北市立土城醫院(委託長庚醫療財團法人興建經營)','新北市','醫院評鑑合格（區域醫院）'),
+('新北市立聯合醫院及其板橋院區','新北市','醫院評鑑合格（區域醫院）'),
+('新光醫療財團法人新光吳火獅紀念醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('新竹市立馬偕兒童醫院(委託台灣基督長老教會馬偕醫療財團法人興建經營)','新竹市','醫院評鑑合格（區域醫院）'),
+('義大醫療財團法人義大癌治療醫院','高雄市','醫院評鑑合格（區域醫院）'),
+('義大醫療財團法人義大醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('彰化基督教醫療財團法人二林基督教醫院','彰化縣','醫院評鑑合格（地區醫院）'),
+('彰化基督教醫療財團法人員林基督教醫院','彰化縣','醫院評鑑合格（地區醫院）'),
+('彰化基督教醫療財團法人雲林基督教醫院','雲林縣','醫院評鑑合格（地區醫院）'),
+('彰化基督教醫療財團法人彰化基督教醫院','彰化縣','醫院評鑑優等（醫學中心）'),
+('臺中榮民總醫院','臺中市','醫院評鑑優等（醫學中心）'),
+('臺中榮民總醫院埔里分院','南投縣','醫院評鑑合格（地區醫院）'),
+('臺中榮民總醫院嘉義分院','嘉義市','醫院評鑑合格（區域醫院）'),
+('臺北市立萬芳醫院-委託臺北醫學大學辦理','臺北市','醫院評鑑優等（醫學中心）'),
+('臺北市立聯合醫院中興院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院仁愛院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院和平婦幼院區及其婦幼院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院忠孝院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院陽明院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北榮民總醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('臺北榮民總醫院員山分院','宜蘭縣','醫院評鑑合格（地區醫院）'),
+('臺北榮民總醫院桃園分院','桃園市','醫院評鑑合格（區域醫院）'),
+('臺北榮民總醫院新竹分院','新竹縣','醫院評鑑合格（地區醫院）'),
+('臺北醫學大學附設醫院','臺北市','醫院評鑑合格（區域醫院－準醫學中心）'),
+('臺南市立安南醫院-委託中國醫藥大學興建經營','臺南市','醫院評鑑合格（區域醫院）'),
+('臺灣基督教門諾會醫療財團法人門諾醫院','花蓮縣','醫院評鑑合格（區域醫院）'),
+('輔仁大學學校財團法人輔仁大學附設醫院','新北市','醫院評鑑合格（區域醫院）'),
+('輔英科技大學附設醫院','屏東縣','醫院評鑑合格（區域醫院）'),
+('澄清綜合醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('澄清綜合醫院中港分院','臺中市','醫院評鑑合格（區域醫院）'),
+('衛生福利部南投醫院及其中興院區','南投縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部屏東醫院','屏東縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部苗栗醫院','苗栗縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部桃園醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('衛生福利部胸腔病院','臺南市','醫院評鑑合格（地區醫院）'),
+('衛生福利部基隆醫院','基隆市','醫院評鑑合格（區域醫院）'),
+('衛生福利部嘉義醫院','嘉義市','醫院評鑑合格（地區醫院）'),
+('衛生福利部彰化醫院','彰化縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部旗山醫院','高雄市','醫院評鑑合格（地區醫院）'),
+('衛生福利部臺中醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('衛生福利部臺北醫院','新北市','醫院評鑑合格（區域醫院）'),
+('衛生福利部臺南醫院','臺南市','醫院評鑑合格（區域醫院）'),
+('衛生福利部樂生療養院','新北市','醫院評鑑合格（地區醫院）'),
+('衛生福利部豐原醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('衛生福利部雙和醫院(委託臺北醫學大學興建經營)','新北市','醫院評鑑優等（醫學中心）'),
+('戴德森醫療財團法人嘉義基督教醫院','嘉義市','醫院評鑑合格（區域醫院）'),
+('聯新國際醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('醫療財團法人徐元智先生醫藥基金會亞東紀念醫院','新北市','醫院評鑑優等（醫學中心）'),
+('醫療財團法人辜公亮基金會和信治癌中心醫院','臺北市','醫院評鑑合格（區域醫院）'),
+('醫療財團法人羅許基金會羅東博愛醫院','宜蘭縣','醫院評鑑合格（區域醫院）'),
+('寶建醫療社團法人寶建醫院','屏東縣','醫院評鑑合格（區域醫院）');
+-- END HOSPITAL DIRECTORY
+
+create or replace function public.nptc_schema_version() returns bigint
+language plpgsql stable security definer set search_path='' as $$
+begin
+ if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
+ return (select max(version) from nptc_private.schema_migrations);
+end;$$;
+create or replace function public.nptc_hospital_directory() returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+begin
+ if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
+ return jsonb_build_object('hospitals',(select coalesce(jsonb_agg(to_jsonb(h) order by city,name),'[]'::jsonb) from nptc_private.hospital_directory h));
+end;$$;
+
+-- 所有題目寫入經同一支函式；版本檢查防止舊草稿覆寫其他人的修改。
+create or replace function public.nptc_teacher_save_stations_v3(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare w nptc_private.workshops; item jsonb; old_item jsonb; seen text[]:='{}'; v_station_key text; cleaned jsonb:='[]';
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'stations') is distinct from 'array'
+ or jsonb_typeof(body-&gt;'stationsRevision') is distinct from 'number' or (body-&gt;&gt;'stationsRevision') !~ '^[0-9]+$' then
+  raise exception '請重新載入最新版題目設定後再儲存。';
+ end if;
+ if jsonb_array_length(body-&gt;'stations')=0 then raise exception '請至少新增一題 OSCE 題目。'; end if;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ if w.id is null then raise exception '找不到此梯次。'; end if;
+ if w.archived_at is not null then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if w.stations_revision&lt;&gt;(body-&gt;&gt;'stationsRevision')::integer then raise exception '題目設定已被其他人更新，請重新載入後再編輯。'; end if;
+ for item in select value from jsonb_array_elements(body-&gt;'stations') loop
+  v_station_key=trim(item-&gt;&gt;'key');
+  if jsonb_typeof(item-&gt;'key') is distinct from 'string' or coalesce(length(v_station_key),0) not between 1 and 100 or v_station_key=any(seen)
+  or jsonb_typeof(item-&gt;'title') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'title')),0) not between 1 and 100
+  or jsonb_typeof(item-&gt;'testDate') is distinct from 'string' or coalesce(item-&gt;&gt;'testDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  or jsonb_typeof(item-&gt;'complaint') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'complaint')),0) not between 1 and 300
+  or jsonb_typeof(item-&gt;'diagnosis') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'diagnosis')),0) not between 1 and 300
+  or jsonb_typeof(item-&gt;'prompt') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'prompt')),0) not between 1 and 2000 then
+   raise exception '每題須完成題目名稱、有效日期、主訴、診斷與命題摘要。';
+  end if;
+  perform (item-&gt;&gt;'testDate')::date;
+  select value into old_item from jsonb_array_elements(w.stations) where value-&gt;&gt;'key'=v_station_key;
+  if item-&gt;'domainMax' is not null and item-&gt;'domainMax'&lt;&gt;'null'::jsonb then perform nptc_private.validate_domain_max(item-&gt;'domainMax');
+  elsif old_item is null or coalesce(length(trim(old_item-&gt;&gt;'title')),0)=0 or (old_item-&gt;'domainMax' is not null and old_item-&gt;'domainMax'&lt;&gt;'null'::jsonb) then
+   raise exception '新題目或已設定配分的題目必須填寫五面向滿分。';
+  end if;
+  if exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=v_station_key) and item is distinct from old_item then
+   raise exception '請先撤回本題公告，再修改題目。';
+  end if;
+  if old_item-&gt;'domainMax' is distinct from item-&gt;'domainMax' and exists(select 1 from nptc_private.station_grades g join nptc_private.students s on s.id=g.student_id
+   where s.workshop_id=w.id and g.station_key=v_station_key and g.domain_scores is not null) then raise exception '已有分項成績，不能變更配分；請建立新題目。'; end if;
+  seen=array_append(seen,v_station_key);cleaned=cleaned||jsonb_build_array(item||jsonb_build_object('key',v_station_key));
+ end loop;
+ if exists(select 1 from jsonb_array_elements(w.published_stations) p where not(p-&gt;&gt;'key'=any(seen)))
+ or exists(select 1 from nptc_private.station_grades g join nptc_private.students s on s.id=g.student_id where s.workshop_id=w.id and (g.score is not null or g.feedback&lt;&gt;'') and not(g.station_key=any(seen))) then
+  raise exception '有成績、回饋或已公告的題目不可刪除。';
+ end if;
+ update nptc_private.workshops set stations=cleaned,stations_revision=stations_revision+1 where id=w.id;
+ return jsonb_build_object('ok',true,'stationsRevision',w.stations_revision+1);
+end;$$;
+create or replace function public.nptc_teacher_save_stations(body jsonb) returns jsonb
+language sql security definer set search_path='' as $$select public.nptc_teacher_save_stations_v3(body)$$;
+
+-- 名冊使用目前規則直接寫入，不再轉接保留的舊版函式。
+create or replace function public.nptc_teacher_write(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare action text:=body-&gt;&gt;'action';w nptc_private.workshops;s nptc_private.students;row_item jsonb;sid uuid;request_uuid uuid;request_record nptc_private.workshop_create_requests;affected integer;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ if action='saveStations' then return public.nptc_teacher_save_stations_v3(body); end if;
+ if action in ('publish','saveScores') then raise exception '請使用新版逐題公告與五面向成績表。'; end if;
+ if action='createWorkshop' then
+  if jsonb_typeof(body-&gt;'name') is distinct from 'string' or length(trim(body-&gt;&gt;'name')) not between 1 and 100
+  or jsonb_typeof(body-&gt;'requestId') is distinct from 'string' then raise exception '請完整輸入梯次名稱，並重新載入新版建立表單。'; end if;
+  request_uuid=(body-&gt;&gt;'requestId')::uuid;
+  insert into nptc_private.workshop_create_requests(admin_id,request_id,name,workshop_id)
+   values(auth.uid(),request_uuid,trim(body-&gt;&gt;'name'),gen_random_uuid()) on conflict do nothing;
+  get diagnostics affected=row_count;
+  select * into request_record from nptc_private.workshop_create_requests where admin_id=auth.uid() and request_id=request_uuid for update;
+  if request_record.name is distinct from trim(body-&gt;&gt;'name') then raise exception '上次建立請求的名稱不同，請先重新整理確認建立結果。'; end if;
+  if affected=0 and not exists(select 1 from nptc_private.workshops where id=request_record.workshop_id) then raise exception '先前建立的梯次已刪除，請重新建立。'; end if;
+  insert into nptc_private.workshops(id,name) values(request_record.workshop_id,request_record.name) on conflict(id) do nothing;
+  return jsonb_build_object('id',request_record.workshop_id);
+ end if;
+ if action is null or action not in ('saveStudent','deleteStudent','bulkImportStudents') then raise exception '不支援的操作。'; end if;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ if w.id is null then raise exception '找不到此梯次。'; end if;
+ if w.archived_at is not null then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if jsonb_array_length(w.published_stations)&gt;0 then raise exception '請先撤回本梯次所有題目公告，再修改名冊。'; end if;
+ if action='bulkImportStudents' then
+  if jsonb_typeof(body-&gt;'students') is distinct from 'array' or jsonb_array_length(body-&gt;'students')=0 then raise exception '請至少提供一位學員。'; end if;
+  for row_item in select value from jsonb_array_elements(body-&gt;'students') loop
+   if jsonb_typeof(row_item-&gt;'name') is distinct from 'string' or jsonb_typeof(row_item-&gt;'email') is distinct from 'string'
+    or jsonb_typeof(row_item-&gt;'phone') is distinct from 'string' or trim(row_item-&gt;&gt;'phone') !~ '^09[0-9]{8}$' then raise exception '請完整填寫姓名、Email 與有效手機。'; end if;
+   insert into nptc_private.students(workshop_id,name,email,phone,updated_by)
+    values(w.id,trim(row_item-&gt;&gt;'name'),lower(trim(row_item-&gt;&gt;'email')),trim(row_item-&gt;&gt;'phone'),auth.uid());
+  end loop;
+  return '{"ok":true}';
+ end if;
+ if body-&gt;&gt;'id' is not null then
+  if jsonb_typeof(body-&gt;'revision') is distinct from 'number' or (body-&gt;&gt;'revision') !~ '^[0-9]+$' then raise exception '資料版本不正確。'; end if;
+  select * into s from nptc_private.students where id=(body-&gt;&gt;'id')::uuid and workshop_id=w.id and revision=(body-&gt;&gt;'revision')::integer for update;
+  if s.id is null then raise exception '資料已更新或已被刪除，請重新載入。'; end if;
+ end if;
+ if action='deleteStudent' then
+  if s.id is null then raise exception '請指定欲刪除的學員。'; end if;
+  delete from nptc_private.students where id=s.id;
+ else
+  if jsonb_typeof(body-&gt;'name') is distinct from 'string' or jsonb_typeof(body-&gt;'email') is distinct from 'string'
+   or jsonb_typeof(body-&gt;'phone') is distinct from 'string' or trim(body-&gt;&gt;'phone') !~ '^09[0-9]{8}$' then raise exception '請完整填寫姓名、Email 與有效手機。'; end if;
+  if s.id is not null and s.email is distinct from lower(trim(body-&gt;&gt;'email')) and
+   (body ? 'profile' or exists(select 1 from auth.users where lower(email)=s.email) or exists(select 1 from nptc_private.student_accounts where email=s.email)) then
+   raise exception '已建立帳號的登入 Email 不可直接改名冊，請聯絡系統管理者處理。';
+  end if;
+  if s.id is null then
+   insert into nptc_private.students(workshop_id,name,email,phone,updated_by) values(w.id,trim(body-&gt;&gt;'name'),lower(trim(body-&gt;&gt;'email')),trim(body-&gt;&gt;'phone'),auth.uid());
+  else
+   update nptc_private.students set name=trim(body-&gt;&gt;'name'),email=lower(trim(body-&gt;&gt;'email')),phone=trim(body-&gt;&gt;'phone'),revision=revision+1,updated_at=now(),updated_by=auth.uid() where id=s.id;
+   if body ? 'profile' then
+    row_item=body-&gt;'profile';
+    if jsonb_typeof(row_item) is distinct from 'object'
+      or not row_item ?&amp; array['nursingYears','hospital','unit','examSpecialty','firstOsce','birthDate']
+      or (row_item-&gt;'nursingYears'&lt;&gt;'null'::jsonb and (jsonb_typeof(row_item-&gt;'nursingYears')&lt;&gt;'number' or (row_item-&gt;&gt;'nursingYears') !~ '^[0-9]+$' or (row_item-&gt;&gt;'nursingYears')::numeric not between 0 and 60))
+      or jsonb_typeof(row_item-&gt;'hospital') is distinct from 'string'
+      or jsonb_typeof(row_item-&gt;'unit') is distinct from 'string' or length(trim(row_item-&gt;&gt;'unit'))&gt;100
+      or jsonb_typeof(row_item-&gt;'examSpecialty') is distinct from 'string' or row_item-&gt;&gt;'examSpecialty' not in ('','內科','精神科','兒科','外科','婦產科','麻醉科','家庭科')
+      or jsonb_typeof(row_item-&gt;'firstOsce') not in ('boolean','null')
+      or jsonb_typeof(row_item-&gt;'birthDate') not in ('string','null')
+      then raise exception '請確認學員基本資料格式。'; end if;
+    if row_item-&gt;&gt;'hospital'&lt;&gt;'' and not exists(select 1 from nptc_private.hospital_directory where name=row_item-&gt;&gt;'hospital') then raise exception '請從官方醫院名冊選擇服務醫院。'; end if;
+    if row_item-&gt;&gt;'birthDate' is not null and ((row_item-&gt;&gt;'birthDate') !~ '^\d{4}-\d{2}-\d{2}$' or (row_item-&gt;&gt;'birthDate')::date not between date '1900-01-01' and current_date) then raise exception '請確認出生年月日。'; end if;
+    update nptc_private.students set nursing_years=(row_item-&gt;&gt;'nursingYears')::integer,
+      hospital=nullif(row_item-&gt;&gt;'hospital',''),unit=nullif(trim(row_item-&gt;&gt;'unit'),''),exam_specialty=nullif(row_item-&gt;&gt;'examSpecialty',''),
+      first_osce=(row_item-&gt;&gt;'firstOsce')::boolean,birth_date=(row_item-&gt;&gt;'birthDate')::date where id=s.id;
+   end if;
+  end if;
+ end if;
+ return '{"ok":true}';
+exception when unique_violation then raise exception '此梯次已有相同的手機電話或 Email。';
+ when check_violation or not_null_violation then raise exception '請確認姓名、Email 與手機電話格式。';
+end;$$;
+
+create or replace function public.nptc_teacher_publish_station(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare w nptc_private.workshops;station text:=body-&gt;&gt;'station';should_publish boolean;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'published') is distinct from 'boolean' then raise exception '公布狀態不正確。'; end if;
+ should_publish=(body-&gt;&gt;'published')::boolean;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ if w.id is null then raise exception '找不到此梯次。'; end if;
+ if w.archived_at is not null then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if not exists(select 1 from jsonb_array_elements(w.stations) x where x-&gt;&gt;'key'=station) then raise exception '找不到指定題目。'; end if;
+ if should_publish and not exists(select 1 from nptc_private.station_grades g join nptc_private.students s on s.id=g.student_id where s.workshop_id=w.id and g.station_key=station and g.score is not null) then raise exception '本題至少要有一筆已登錄成績才能公布。'; end if;
+ update nptc_private.workshops set published_stations=case when should_publish then
+  (select coalesce(jsonb_agg(distinct jsonb_build_object('key',v)),'[]'::jsonb) from unnest(array_append(array(select p-&gt;&gt;'key' from jsonb_array_elements(published_stations) p),station)) v)
+ else (select coalesce(jsonb_agg(p),'[]'::jsonb) from jsonb_array_elements(published_stations) p where p-&gt;&gt;'key'&lt;&gt;station) end,
+ published=0,stations_revision=stations_revision+1 where id=w.id;
+ return '{"ok":true}';
+end;$$;
+
+create or replace function public.nptc_student_update_profile(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not public.nptc_is_teacher() and not exists(select 1 from nptc_private.student_accounts where user_id=auth.uid() and email=e) then raise exception '請先核對學員名冊。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'nursingYears') is distinct from 'number' or (body-&gt;&gt;'nursingYears')::numeric not between 0 and 60
+ or (body-&gt;&gt;'nursingYears')::numeric&lt;&gt;trunc((body-&gt;&gt;'nursingYears')::numeric) or jsonb_typeof(body-&gt;'firstOsce') is distinct from 'boolean'
+ or jsonb_typeof(body-&gt;'hospital') is distinct from 'string' or jsonb_typeof(body-&gt;'unit') is distinct from 'string'
+ or coalesce(length(trim(body-&gt;&gt;'unit')),0) not between 1 and 100
+ or coalesce(body-&gt;&gt;'examSpecialty','') not in ('內科','精神科','兒科','外科','婦產科','麻醉科','家庭科')
+ or coalesce(body-&gt;&gt;'birthDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then raise exception '請完整填寫有效的個人資料。'; end if;
+ if not exists(select 1 from nptc_private.hospital_directory where name=body-&gt;&gt;'hospital') then raise exception '請從目前的官方醫院名冊選擇服務醫院。'; end if;
+ if (body-&gt;&gt;'birthDate')::date&gt;current_date or (body-&gt;&gt;'birthDate')::date&lt;date '1900-01-01' then raise exception '請確認出生年月日。'; end if;
+ update nptc_private.students s set nursing_years=(body-&gt;&gt;'nursingYears')::integer,hospital=body-&gt;&gt;'hospital',unit=trim(body-&gt;&gt;'unit'),
+ exam_specialty=body-&gt;&gt;'examSpecialty',first_osce=(body-&gt;&gt;'firstOsce')::boolean,birth_date=(body-&gt;&gt;'birthDate')::date,updated_at=now(),updated_by=auth.uid()
+ where s.email=e and exists(select 1 from nptc_private.workshops w where w.id=s.workshop_id and w.archived_at is null);
+ if not found then raise exception '目前沒有可更新的未封存學員名冊，請聯絡管理員。'; end if;
+ return '{"ok":true}';
+end;$$;
+
+-- Email 變更須先由 Auth 完成信箱確認，再依相同 user_id 同步歷史名冊。
+create or replace function nptc_private.reject_archived_workshop_change() returns trigger
+language plpgsql set search_path='' as $$
+declare target uuid;
+begin
+ if TG_OP='DELETE' and current_setting('nptc.delete_archived_workshop',true)='on' then return old; end if;
+ if TG_TABLE_NAME='workshops' then
+  if TG_OP='DELETE' then raise exception '請先封存梯次，再由系統管理者刪除。'; end if;
+  if old.archived_at is not null and (new.archived_at is not null or (new.name,new.published,new.stations,new.published_stations,new.stations_revision)
+   is distinct from (old.name,old.published,old.stations,old.published_stations,old.stations_revision)) then raise exception '封存梯次不可修改，請先還原。'; end if;
+  return new;
+ end if;
+ if TG_TABLE_NAME='students' then
+  if TG_OP='UPDATE' and current_setting('nptc.student_email_sync',true)=auth.uid()::text and new.email=lower(auth.jwt()-&gt;&gt;'email')
+   and old.email is distinct from new.email and (to_jsonb(new)-array['email','revision','updated_at','updated_by']) is not distinct from (to_jsonb(old)-array['email','revision','updated_at','updated_by']) then return new; end if;
+  target=case when TG_OP='DELETE' then old.workshop_id else new.workshop_id end;
+ else select s.workshop_id into target from nptc_private.students s where s.id=case when TG_OP='DELETE' then old.student_id else new.student_id end; end if;
+ if exists(select 1 from nptc_private.workshops w where w.id=target and w.archived_at is not null) then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if TG_OP='DELETE' then return old; end if;
+ return new;
+end;$$;
+create or replace function public.nptc_sync_student_email() returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();previous text;
+begin
+ select email into previous from nptc_private.student_accounts where user_id=auth.uid() for update;
+ if previous is null or previous=e then return '{"ok":true}'; end if;
+ if exists(select 1 from nptc_private.teachers where email in(previous,e)) then raise exception '後臺帳號的 Email 變更請聯絡系統管理者。'; end if;
+ perform set_config('nptc.student_email_sync',auth.uid()::text,true);
+ update nptc_private.students set email=e,revision=revision+1,updated_at=now(),updated_by=auth.uid() where email=previous;
+ update nptc_private.student_accounts set email=e where user_id=auth.uid();
+ insert into nptc_private.student_email_changes(user_id,previous_email,new_email) values(auth.uid(),previous,e);
+ perform set_config('nptc.student_email_sync','',true);
+ return '{"ok":true}';
+exception when unique_violation then raise exception '新 Email 與既有名冊衝突，請聯絡系統管理者核對，原紀錄仍保留。';
+end;$$;
+
+-- BEGIN CURRENT READ FUNCTIONS
+create or replace function nptc_private.teacher_data(requested_workshop uuid default null,include_archived boolean default false) returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare selected nptc_private.workshops; items jsonb; roster jsonb;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ select coalesce(jsonb_agg(to_jsonb(w) || jsonb_build_object('publishedStations',coalesce((select jsonb_agg(p-&gt;&gt;'key') from jsonb_array_elements(w.published_stations) p),'[]'::jsonb)) order by w.created_at desc,w.id),'[]'::jsonb)
+  into items from nptc_private.workshops w where (include_archived or w.archived_at is null);
+ select * into selected from nptc_private.workshops w where (include_archived or w.archived_at is null)
+  order by (w.id=requested_workshop) desc nulls last,w.created_at desc,w.id limit 1;
+ select coalesce(jsonb_agg(to_jsonb(s) || coalesce((select jsonb_object_agg(g.station_key||'_domains',g.domain_scores) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) || jsonb_build_object('account_registered',exists(select 1 from auth.users u where lower(trim(u.email))=lower(trim(s.email))),'account_activated_at',(select a.activated_at from nptc_private.student_accounts a join auth.users u on u.id=a.user_id and lower(trim(u.email))=lower(trim(a.email)) where lower(trim(a.email))=lower(trim(s.email)) limit 1)) || coalesce((select jsonb_object_agg(g.station_key||'_score',g.score) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) || coalesce((select jsonb_object_agg(g.station_key||'_rating',g.rating) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) || coalesce((select jsonb_object_agg(g.station_key||'_feedback',g.feedback) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) order by s.phone,s.name),'[]'::jsonb)
+  into roster from nptc_private.students s where s.workshop_id=selected.id;
+ return jsonb_build_object('includesArchived',include_archived,'workshops',items,'selected',case when selected.id is null then null else to_jsonb(selected) || jsonb_build_object('publishedStations',coalesce((select jsonb_agg(p-&gt;&gt;'key') from jsonb_array_elements(selected.published_stations) p),'[]'::jsonb)) end,'students',roster,'thresholds',case when selected.id is null then '[]'::jsonb else nptc_private.dynamic_thresholds(selected.id) end);
+end;$$;
+
+
+create or replace function public.nptc_teacher_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,false)$$;
+create or replace function public.nptc_analysis_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,public.nptc_is_account_reviewer())$$;
+revoke all on function nptc_private.teacher_data(uuid,boolean) from public,anon,authenticated;
+revoke all on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) from public,anon;
+grant execute on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) to authenticated;
+
+create or replace function public.nptc_student_onboarding_status() returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity(); a nptc_private.student_accounts; s nptc_private.students;
+begin
+ select * into a from nptc_private.student_accounts where user_id=auth.uid() and email=e;
+ if a.user_id is null then return jsonb_build_object('stage','unclaimed'); end if;
+ select student.* into s from nptc_private.students student join nptc_private.workshops w on w.id=student.workshop_id where student.email=e order by (w.archived_at is null) desc,student.updated_at desc nulls last,student.id limit 1;
+ if s.id is null then raise exception '目前沒有您的學員名冊，請聯絡管理員。'; end if;
+ return jsonb_build_object('stage',case when a.activated_at is null then 'profile' else 'active' end,
+ 'student',jsonb_build_object('name',s.name,'email',s.email,'phone',s.phone,
+ 'nursingYears',s.nursing_years,'hospital',s.hospital,'unit',s.unit,
+ 'examSpecialty',s.exam_specialty,'firstOsce',s.first_osce,'birthDate',s.birth_date));
+end;$$;
+
+create or replace function public.nptc_claim_student(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not exists(select 1 from nptc_private.students where email=e and trim(name)=trim(body-&gt;&gt;'name')
+  and regexp_replace(phone,'[[:space:]-]','','g')=regexp_replace(body-&gt;&gt;'phone','[[:space:]-]','','g')
+  and length(coalesce(body-&gt;&gt;'phone',''))&gt;=10) then
+  raise exception '姓名、Email 與手機未能對應名冊，請確認資料或聯絡管理員。';
+ end if;
+ insert into nptc_private.student_accounts(user_id,email) values(auth.uid(),e)
+ on conflict(user_id) do nothing;
+ return public.nptc_student_onboarding_status();
+end;$$;
+
+create or replace function public.nptc_student_data() returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not public.nptc_is_teacher() and not exists(select 1 from nptc_private.student_accounts
+ where user_id=auth.uid() and email=e and activated_at is not null) then
+  raise exception '請先完成首次啟用、個人資料與密碼設定。' using errcode='42501';
+ end if;
+ return nptc_private.student_data_before_activation();
+end;$$;
+
+create or replace function public.nptc_finish_student_activation() returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not exists(select 1 from auth.users where id=auth.uid() and length(encrypted_password)&gt;0) then
+  raise exception '請先設定登入密碼。';
+ end if;
+ if not exists(select 1 from nptc_private.students where email=e and nursing_years is not null
+  and length(trim(hospital))&gt;0 and length(trim(unit))&gt;0 and exam_specialty is not null
+  and first_osce is not null and birth_date between date '1900-01-01' and current_date) then
+  raise exception '請先完整填寫個人資料。';
+ end if;
+ update nptc_private.student_accounts set activated_at=coalesce(activated_at,now()) where user_id=auth.uid() and email=e;
+ if not found then raise exception '請先核對學員名冊。'; end if;
+ return '{"ok":true}';
+end;$$;
+
+create or replace function nptc_private.student_data_before_activation() returns jsonb language plpgsql stable security definer set search_path='' as $$
+declare result jsonb;
+begin
+ if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
+ select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'email',s.email,'phone',s.phone,'workshopName',w.name,'archived',w.archived_at is not null,'published',case when jsonb_array_length(w.published_stations)&gt;0 then 1 else 0 end,'profile',jsonb_build_object('nursingYears',s.nursing_years,'hospital',coalesce(s.hospital,''),'unit',coalesce(s.unit,''),'examSpecialty',coalesce(s.exam_specialty,''),'firstOsce',s.first_osce,'birthDate',coalesce(s.birth_date::text,'')),'stations',coalesce((select jsonb_agg(x.value order by x.ordinality) from jsonb_array_elements(w.stations) with ordinality x(value,ordinality) where exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=x.value-&gt;&gt;'key')),'[]'::jsonb),'updatedAt',s.updated_at,'grades',coalesce((select jsonb_agg(jsonb_build_object('key',g.station_key,'score',g.score,'rating',g.rating,'feedback',g.feedback,'domains',g.domain_scores)) from nptc_private.station_grades g where g.student_id=s.id and exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=g.station_key)),'[]'::jsonb),'thresholds',nptc_private.dynamic_thresholds(w.id,true)) order by w.created_at desc,w.id),'[]'::jsonb) into result from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id where s.email=lower(auth.jwt()-&gt;&gt;'email');
+ return jsonb_build_object('records',result);
+end;$$;
+
+create or replace function public.nptc_teacher_batch_scores_v3(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare w nptc_private.workshops; item jsonb; v_station_key text:=body-&gt;&gt;'station'; definition jsonb; total numeric; rating_value integer; domains jsonb; affected integer; seen uuid[]:='{}'; student_uuid uuid;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有老師權限。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'items') is distinct from 'array' then raise exception '成績資料格式不正確。'; end if;
+ if jsonb_array_length(body-&gt;'items')=0 then raise exception '請選擇要儲存的學員。'; end if;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ select value into definition from jsonb_array_elements(w.stations) where value-&gt;&gt;'key'=v_station_key;
+ if definition is null then raise exception '找不到指定題目。'; end if;
+ perform nptc_private.validate_domain_max(definition-&gt;'domainMax');
+ if exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=v_station_key) then raise exception '請先撤回本題公告，再修改成績。'; end if;
+ for item in select value from jsonb_array_elements(body-&gt;'items') loop
+  if jsonb_typeof(item-&gt;'id') is distinct from 'string' or jsonb_typeof(item-&gt;'revision') is distinct from 'number' or not(item ? 'domains') or not(item ? 'rating') then raise exception '請使用五面向成績表完整輸入。'; end if;
+  if (item-&gt;&gt;'revision')::numeric&lt;&gt;trunc((item-&gt;&gt;'revision')::numeric) then raise exception '資料版本不正確。'; end if;
+  student_uuid=(item-&gt;&gt;'id')::uuid;
+  if student_uuid=any(seen) then raise exception '批次學員不可重複。'; end if;
+  seen=array_append(seen,student_uuid);
+  domains=item-&gt;'domains';
+  if domains='null'::jsonb and item-&gt;'rating'='null'::jsonb then total=null;rating_value=null;domains=null;
+  else
+   total=nptc_private.domain_score_total(domains,definition-&gt;'domainMax');
+   if jsonb_typeof(item-&gt;'rating') is distinct from 'number' then raise exception 'Global Rating 須為 1–5 的整數。'; end if;
+   if (item-&gt;&gt;'rating')::numeric not between 1 and 5 or (item-&gt;&gt;'rating')::numeric&lt;&gt;trunc((item-&gt;&gt;'rating')::numeric) then raise exception 'Global Rating 須為 1–5 的整數。'; end if;
+   rating_value=(item-&gt;&gt;'rating')::integer;
+  end if;
+  update nptc_private.students set revision=revision+1,updated_at=now(),updated_by=auth.uid() where id=student_uuid and workshop_id=w.id and revision=(item-&gt;&gt;'revision')::integer;
+  get diagnostics affected=row_count;
+  if affected=0 then raise exception '學員不在本梯次或資料已更新，請重新載入。'; end if;
+  insert into nptc_private.station_grades(student_id,station_key,score,rating,domain_scores,feedback,updated_at,updated_by)
+  values(student_uuid,v_station_key,total,rating_value,domains,trim(coalesce(item-&gt;&gt;'feedback','')),now(),auth.uid())
+  on conflict(student_id,station_key) do update set score=excluded.score,rating=excluded.rating,domain_scores=excluded.domain_scores,feedback=excluded.feedback,updated_at=excluded.updated_at,updated_by=excluded.updated_by;
+ end loop;
+ return '{"ok":true}';
+end;$$;
+
+create or replace function public.nptc_teacher_batch_scores_v2(body jsonb) returns jsonb language sql security definer set search_path='' as $$select public.nptc_teacher_batch_scores_v3(body)$$;
+
+create or replace function public.nptc_verify_student_roster(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare normalized_email text := lower(trim(body-&gt;&gt;'email')); attempt_count integer;
+begin
+ if coalesce(normalized_email,'')='' then return jsonb_build_object('ok',false); end if;
+ insert into nptc_private.activation_attempts as a(email_hash,attempts,started_at)
+ values(encode(sha256(convert_to(normalized_email,'UTF8')),'hex'),1,now())
+ on conflict(email_hash) do update set
+ attempts=case when a.started_at &lt; now()-interval '1 hour' then 1 else a.attempts+1 end,
+ started_at=case when a.started_at &lt; now()-interval '1 hour' then now() else a.started_at end
+ returning attempts into attempt_count;
+ if attempt_count&gt;5 then return jsonb_build_object('ok',false); end if;
+ if exists(select 1 from nptc_private.students s
+  where lower(trim(s.email))=normalized_email and trim(s.name)=trim(body-&gt;&gt;'name')
+  and s.phone=body-&gt;&gt;'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$')
+  and exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false,'code',case when exists(
+   select 1 from nptc_private.student_accounts a join auth.users u on u.id=a.user_id
+   where lower(a.email)=normalized_email and lower(u.email)=normalized_email and a.activated_at is not null
+  ) then 'already_activated' else 'account_exists' end);
+ end if;
+ if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false);
+ end if;
+ if not exists(select 1 from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id
+   where w.archived_at is null and lower(trim(s.email))=normalized_email and trim(s.name)=trim(body-&gt;&gt;'name')
+  and s.phone=body-&gt;&gt;'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$') then
+  return jsonb_build_object('ok',false);
+ end if;
+ return jsonb_build_object('ok',true,'email',normalized_email);
+end; $$;
+
+create or replace function nptc_private.require_fresh_admin_password() returns void
+language plpgsql security definer set search_path='' as $$
+declare session_key text:=auth.jwt()-&gt;&gt;'session_id'; password_at timestamptz;
+begin
+ if not public.nptc_is_account_reviewer() then
+  raise exception '只有系統管理者可執行此操作。' using errcode='42501';
+ end if;
+ select to_timestamp((method-&gt;&gt;'timestamp')::double precision) into password_at
+ from jsonb_array_elements(coalesce(auth.jwt()-&gt;'amr','[]'::jsonb)) method
+ where method-&gt;&gt;'method'='password' and jsonb_typeof(method-&gt;'timestamp')='number'
+ order by (method-&gt;&gt;'timestamp')::double precision desc limit 1;
+ if coalesce(session_key,'')='' or password_at is null
+  or password_at &lt; now()-interval '2 minutes' or password_at &gt; now()+interval '30 seconds' then
+  raise exception '請重新輸入系統管理者帳號與密碼。' using errcode='42501';
+ end if;
+ delete from nptc_private.workshop_action_sessions where used_at &lt; now()-interval '7 days';
+ insert into nptc_private.workshop_action_sessions(session_id,admin_id) values(session_key,auth.uid())
+ on conflict do nothing;
+ if not found then
+  raise exception '本次密碼驗證已使用，請重新輸入帳號與密碼。' using errcode='42501';
+ end if;
+end;$$;
+
+create or replace function public.nptc_set_workshop_archived(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare target uuid; archive boolean;
+begin
+ if not public.nptc_is_account_reviewer() then raise exception '只有系統管理者可封存或還原梯次。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'archived') is distinct from 'boolean' then raise exception '梯次資料不正確。'; end if;
+ target=(body-&gt;&gt;'workshopId')::uuid; archive=(body-&gt;&gt;'archived')::boolean;
+ if archive then perform nptc_private.require_fresh_admin_password(); end if;
+ update nptc_private.workshops set archived_at=case when archive then now() else null end
+  where id=target and (archived_at is null)=archive;
+ if not found then raise exception '梯次不存在或狀態已變更，請重新整理。'; end if;
+ return '{"ok":true}'::jsonb;
+end;$$;
+
+create or replace function public.nptc_delete_archived_workshop(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare target uuid; actual_name text;
+begin
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'name') is distinct from 'string' then
+  raise exception '梯次資料不正確。';
+ end if;
+ target=(body-&gt;&gt;'workshopId')::uuid;
+ perform nptc_private.require_fresh_admin_password();
+ select name into actual_name from nptc_private.workshops where id=target and archived_at is not null for update;
+ if not found then raise exception '只能刪除已封存的梯次，請重新整理。'; end if;
+ if body-&gt;&gt;'name' is distinct from actual_name then raise exception '梯次名稱不符，請重新確認。'; end if;
+ perform set_config('nptc.delete_archived_workshop','on',true);
+ delete from nptc_private.station_grades g using nptc_private.students s
+  where g.student_id=s.id and s.workshop_id=target;
+ delete from nptc_private.students where workshop_id=target;
+ delete from nptc_private.workshops where id=target;
+ perform set_config('nptc.delete_archived_workshop','off',true);
+ return '{"ok":true}'::jsonb;
+end;$$;
+-- END CURRENT READ FUNCTIONS
+
+-- 明確關閉已廢止的入口，保留現行批次成績 RPC 的完整驗證。
+do $$ begin
+ if to_regprocedure('public.nptc_issue_student_invitation(uuid)') is not null then execute 'revoke all on function public.nptc_issue_student_invitation(uuid) from public,anon,authenticated'; end if;
+ if to_regprocedure('public.nptc_consume_student_invitation(jsonb)') is not null then execute 'revoke all on function public.nptc_consume_student_invitation(jsonb) from public,anon,authenticated,service_role'; end if;
+ if to_regprocedure('nptc_private.teacher_write_before_domains(jsonb)') is not null then execute 'revoke all on function nptc_private.teacher_write_before_domains(jsonb) from public,anon,authenticated'; end if;
+ if to_regprocedure('public.nptc_teacher_batch_scores(jsonb)') is not null then execute 'revoke all on function public.nptc_teacher_batch_scores(jsonb) from public,anon,authenticated'; end if;
+end;$$;
+revoke all on function public.nptc_verify_student_roster(jsonb) from public,anon,authenticated;
+grant execute on function public.nptc_verify_student_roster(jsonb) to service_role;
+revoke all on function public.nptc_teacher_batch_scores_v2(jsonb),public.nptc_teacher_batch_scores_v3(jsonb),
+public.nptc_student_onboarding_status(),public.nptc_claim_student(jsonb),public.nptc_student_data(),public.nptc_finish_student_activation(),
+public.nptc_set_workshop_archived(jsonb),public.nptc_delete_archived_workshop(jsonb) from public,anon;
+grant execute on function public.nptc_teacher_batch_scores_v2(jsonb),public.nptc_teacher_batch_scores_v3(jsonb),
+public.nptc_student_onboarding_status(),public.nptc_claim_student(jsonb),public.nptc_student_data(),public.nptc_finish_student_activation(),
+public.nptc_set_workshop_archived(jsonb),public.nptc_delete_archived_workshop(jsonb) to authenticated;
+revoke all on function nptc_private.require_fresh_admin_password() from public,anon,authenticated;
+revoke all on function public.nptc_schema_version(),public.nptc_hospital_directory(),public.nptc_sync_student_email(),public.nptc_teacher_write(jsonb),
+ public.nptc_teacher_save_stations_v3(jsonb),public.nptc_teacher_save_stations(jsonb),public.nptc_teacher_publish_station(jsonb) from public,anon;
+grant execute on function public.nptc_schema_version(),public.nptc_hospital_directory(),public.nptc_sync_student_email(),public.nptc_teacher_write(jsonb),
+ public.nptc_teacher_save_stations_v3(jsonb),public.nptc_teacher_save_stations(jsonb),public.nptc_teacher_publish_station(jsonb) to authenticated;
+revoke all on function nptc_private.reject_archived_workshop_change() from public,anon,authenticated;
+insert into nptc_private.schema_migrations(version) values(2026100701) on conflict do nothing;
+notify pgrst,'reload schema';
+commit;
+</pre></details><details><summary>修改後完整檔案</summary><pre>-- 現行版本 2026100701。適用已完成五面向、學員啟用、管理員角色與敏感操作的環境。
+-- 新安裝使用 install.sql；請整份執行，可重跑。醫院種子由 scripts/build-supabase.mjs 產生。
+begin;
+do $$ begin
+ if to_regprocedure('nptc_private.student_identity()') is null
+ or to_regprocedure('nptc_private.require_fresh_admin_password()') is null
+ or not exists(select 1 from information_schema.columns where table_schema='nptc_private' and table_name='station_grades' and column_name='domain_scores') then
+  raise exception '前置升級未完成，請依 README 的既有環境升級順序操作。';
+ end if;
+end; $$;
+
+create table if not exists nptc_private.schema_migrations(version bigint primary key, installed_at timestamptz not null default now());
+alter table nptc_private.schema_migrations enable row level security;
+alter table nptc_private.workshops add column if not exists stations_revision integer not null default 0 check(stations_revision&gt;=0);
+create table if not exists nptc_private.hospital_directory(name text primary key, city text not null, level text not null);
+alter table nptc_private.hospital_directory enable row level security;
+create table if not exists nptc_private.workshop_create_requests(
+ admin_id uuid not null, request_id uuid not null, name text not null, workshop_id uuid not null,
+ primary key(admin_id,request_id));
+alter table nptc_private.workshop_create_requests enable row level security;
+create table if not exists nptc_private.student_email_changes(
+ id uuid primary key default gen_random_uuid(),user_id uuid not null,previous_email text not null,new_email text not null,
+ changed_at timestamptz not null default now());
+alter table nptc_private.student_email_changes enable row level security;
+revoke all on all tables in schema nptc_private from public,anon,authenticated;
+
+-- BEGIN HOSPITAL DIRECTORY
+delete from nptc_private.hospital_directory;
+insert into nptc_private.hospital_directory(name,city,level) values
+('三軍總醫院松山分院附設民眾診療服務處','臺北市','醫院評鑑合格（區域醫院）'),
+('三軍總醫院附設民眾診療服務處及其汀州院區','臺北市','醫院評鑑優等（醫學中心）'),
+('三軍總醫院澎湖分院附設民眾診療服務處','澎湖縣','醫院評鑑合格（地區醫院）'),
+('大千綜合醫院','苗栗縣','醫院評鑑合格（地區醫院）'),
+('中山醫學大學附設醫院','臺中市','醫院評鑑優等（醫學中心）'),
+('中國醫藥大學北港附設醫院','雲林縣','醫院評鑑合格（區域醫院）'),
+('中國醫藥大學附設醫院','臺中市','醫院評鑑優等（醫學中心）'),
+('中國醫藥大學新竹附設醫院','新竹縣','醫院評鑑合格（地區醫院）'),
+('仁愛醫療財團法人大里仁愛醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('天主教中華聖母修女會醫療財團法人天主教聖馬爾定醫院及其民權院區','嘉義市','醫院評鑑合格（區域醫院）'),
+('天主教仁慈醫療財團法人仁慈醫院','新竹縣','醫院評鑑合格（地區醫院）'),
+('天主教若瑟醫療財團法人若瑟醫院','雲林縣','醫院評鑑合格（地區醫院）'),
+('天主教耕莘醫療財團法人永和耕莘醫院','新北市','醫院評鑑合格（地區醫院）'),
+('天主教耕莘醫療財團法人耕莘醫院','新北市','醫院評鑑合格（區域醫院）'),
+('天主教耕莘醫療財團法人耕莘醫院安康院區','新北市','醫院評鑑合格（地區醫院）'),
+('天主教聖功醫療財團法人聖功醫院','高雄市','醫院評鑑合格（地區醫院）'),
+('天主教靈醫會醫療財團法人羅東聖母醫院','宜蘭縣','醫院評鑑合格（區域醫院）'),
+('天成醫院','桃園市','醫院評鑑合格（地區醫院）'),
+('天成醫療社團法人天晟醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('台南市立醫院(委託秀傳醫療社團法人經營)','臺南市','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會馬偕醫療財團法人台東馬偕紀念醫院','臺東縣','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會馬偕醫療財團法人馬偕紀念醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('台灣基督長老教會馬偕醫療財團法人淡水馬偕紀念醫院','新北市','醫院評鑑優等（醫學中心）'),
+('台灣基督長老教會馬偕醫療財團法人新竹馬偕紀念醫院','新竹市','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會新樓醫療財團法人台南新樓醫院','臺南市','醫院評鑑合格（區域醫院）'),
+('台灣基督長老教會新樓醫療財團法人麻豆新樓醫院','臺南市','醫院評鑑合格（地區醫院）'),
+('光田醫療社團法人光田綜合醫院及其大甲院區','臺中市','醫院評鑑合格（區域醫院）'),
+('行天宮醫療志業醫療財團法人恩主公醫院','新北市','醫院評鑑合格（區域醫院）'),
+('西園醫療社團法人西園醫院','臺北市','醫院評鑑合格（地區醫院）'),
+('佛教慈濟醫療財團法人大林慈濟醫院','嘉義縣','醫院評鑑合格（區域醫院－準醫學中心）'),
+('佛教慈濟醫療財團法人台中慈濟醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('佛教慈濟醫療財團法人台北慈濟醫院','新北市','醫院評鑑優等（醫學中心）'),
+('佛教慈濟醫療財團法人花蓮慈濟醫院','花蓮縣','醫院評鑑優等（醫學中心）'),
+('李綜合醫療社團法人大甲李綜合醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('李綜合醫療社團法人苑裡李綜合醫院','苗栗縣','醫院評鑑合格（地區醫院）'),
+('沙爾德聖保祿修女會醫療財團法人聖保祿醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('秀傳醫療社團法人秀傳紀念醫院','彰化縣','醫院評鑑合格（區域醫院）'),
+('秀傳醫療財團法人彰濱秀傳紀念醫院','彰化縣','醫院評鑑合格（區域醫院）'),
+('阮綜合醫療社團法人阮綜合醫院','高雄市','醫院評鑑合格（區域醫院）'),
+('亞洲大學附屬醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('奇美醫療財團法人佳里奇美醫院','臺南市','醫院評鑑合格（地區醫院）'),
+('奇美醫療財團法人奇美醫院及其樹林院區','臺南市','醫院評鑑優等（醫學中心）'),
+('奇美醫療財團法人柳營奇美醫院','臺南市','醫院評鑑合格（區域醫院）'),
+('怡仁綜合醫院','桃園市','醫院評鑑合格（地區醫院）'),
+('東元醫療社團法人東元綜合醫院','新竹縣','醫院評鑑合格（區域醫院）'),
+('東基醫療財團法人台東基督教醫院','臺東縣','醫院評鑑合格（地區醫院）'),
+('林新醫療社團法人林新醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('林新醫療社團法人烏日林新醫院','臺中市','醫院評鑑合格（地區醫院）'),
+('長庚醫療財團法人台北長庚紀念醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('長庚醫療財團法人林口長庚紀念醫院','桃園市','醫院評鑑優等（醫學中心）'),
+('長庚醫療財團法人桃園長庚紀念醫院及其長青院區','桃園市','醫院評鑑合格（地區醫院）'),
+('長庚醫療財團法人高雄長庚紀念醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('長庚醫療財團法人基隆長庚紀念醫院及其情人湖院區','基隆市','醫院評鑑合格（區域醫院）'),
+('長庚醫療財團法人嘉義長庚紀念醫院','嘉義縣','醫院評鑑合格（區域醫院）'),
+('屏東榮民總醫院','屏東縣','醫院評鑑合格（地區醫院）'),
+('屏東榮民總醫院龍泉分院','屏東縣','醫院評鑑合格（地區醫院）'),
+('屏基醫療財團法人屏東基督教醫院及其瑞光院區','屏東縣','醫院評鑑合格（區域醫院）'),
+('為恭醫療財團法人為恭紀念醫院及其東興院區','苗栗縣','醫院評鑑合格（區域醫院）'),
+('埔基醫療財團法人埔里基督教醫院','南投縣','醫院評鑑合格（區域醫院）'),
+('振興醫療財團法人振興醫院','臺北市','醫院評鑑合格（區域醫院）'),
+('財團法人私立高雄醫學大學附設中和紀念醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('高雄市立小港醫院（委託財團法人私立高雄醫學大學經營）','高雄市','醫院評鑑合格（區域醫院）'),
+('高雄市立鳳山醫院（委託長庚醫療財團法人經營）','高雄市','醫院評鑑合格（地區醫院）'),
+('高雄市立聯合醫院','高雄市','醫院評鑑合格（區域醫院）'),
+('高雄榮民總醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('高雄榮民總醫院臺南分院','臺南市','醫院評鑑合格（地區醫院）'),
+('健仁醫院','高雄市','醫院評鑑合格（地區醫院）'),
+('國立台灣大學醫學院附設醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('國立成功大學醫學院附設醫院','臺南市','醫院評鑑優等（醫學中心）'),
+('國立成功大學醫學院附設醫院斗六分院','雲林縣','醫院評鑑合格（地區醫院）'),
+('國立陽明交通大學附設醫院及其新民院區','宜蘭縣','醫院評鑑合格（區域醫院）'),
+('國立臺灣大學醫學院附設醫院雲林分院及其虎尾院區','雲林縣','醫院評鑑合格（區域醫院－準醫學中心）'),
+('國立臺灣大學醫學院附設醫院新竹臺大分院生醫醫院及其竹東院區','新竹縣','醫院評鑑合格（區域醫院）'),
+('國立臺灣大學醫學院附設醫院新竹臺大分院新竹醫院','新竹市','醫院評鑑優等（醫學中心）'),
+('國立臺灣大學醫學院附設醫院癌醫中心分院','臺北市','醫院評鑑合格（區域醫院）'),
+('國軍左營總醫院附設民眾診療服務處','高雄市','醫院評鑑合格（區域醫院）'),
+('國軍花蓮總醫院附設民眾診療服務處','花蓮縣','醫院評鑑合格（區域醫院）'),
+('國軍桃園總醫院附設民眾診療服務處','桃園市','醫院評鑑合格（區域醫院）'),
+('國軍高雄總醫院附設民眾診療服務處','高雄市','醫院評鑑合格（區域醫院）'),
+('國軍臺中總醫院附設民眾診療服務處','臺中市','醫院評鑑合格（區域醫院）'),
+('國泰醫療財團法人汐止國泰綜合醫院','新北市','醫院評鑑合格（區域醫院）'),
+('國泰醫療財團法人國泰綜合醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('國泰醫療財團法人新竹國泰綜合醫院','新竹市','醫院評鑑合格（地區醫院）'),
+('基督復臨安息日會醫療財團法人臺安醫院','臺北市','醫院評鑑合格（區域醫院）'),
+('敏盛綜合醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('郭綜合醫院','臺南市','醫院評鑑合格（地區醫院）'),
+('博仁綜合醫院','臺北市','醫院評鑑合格（地區醫院）'),
+('童綜合醫療社團法人童綜合醫院及其沙鹿院區','臺中市','醫院評鑑合格（區域醫院）'),
+('新北市立土城醫院(委託長庚醫療財團法人興建經營)','新北市','醫院評鑑合格（區域醫院）'),
+('新北市立聯合醫院及其板橋院區','新北市','醫院評鑑合格（區域醫院）'),
+('新光醫療財團法人新光吳火獅紀念醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('新竹市立馬偕兒童醫院(委託台灣基督長老教會馬偕醫療財團法人興建經營)','新竹市','醫院評鑑合格（區域醫院）'),
+('義大醫療財團法人義大癌治療醫院','高雄市','醫院評鑑合格（區域醫院）'),
+('義大醫療財團法人義大醫院','高雄市','醫院評鑑優等（醫學中心）'),
+('彰化基督教醫療財團法人二林基督教醫院','彰化縣','醫院評鑑合格（地區醫院）'),
+('彰化基督教醫療財團法人員林基督教醫院','彰化縣','醫院評鑑合格（地區醫院）'),
+('彰化基督教醫療財團法人雲林基督教醫院','雲林縣','醫院評鑑合格（地區醫院）'),
+('彰化基督教醫療財團法人彰化基督教醫院','彰化縣','醫院評鑑優等（醫學中心）'),
+('臺中榮民總醫院','臺中市','醫院評鑑優等（醫學中心）'),
+('臺中榮民總醫院埔里分院','南投縣','醫院評鑑合格（地區醫院）'),
+('臺中榮民總醫院嘉義分院','嘉義市','醫院評鑑合格（區域醫院）'),
+('臺北市立萬芳醫院-委託臺北醫學大學辦理','臺北市','醫院評鑑優等（醫學中心）'),
+('臺北市立聯合醫院中興院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院仁愛院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院和平婦幼院區及其婦幼院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院忠孝院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北市立聯合醫院陽明院區','臺北市','醫院評鑑合格（區域醫院）'),
+('臺北榮民總醫院','臺北市','醫院評鑑優等（醫學中心）'),
+('臺北榮民總醫院員山分院','宜蘭縣','醫院評鑑合格（地區醫院）'),
+('臺北榮民總醫院桃園分院','桃園市','醫院評鑑合格（區域醫院）'),
+('臺北榮民總醫院新竹分院','新竹縣','醫院評鑑合格（地區醫院）'),
+('臺北醫學大學附設醫院','臺北市','醫院評鑑合格（區域醫院－準醫學中心）'),
+('臺南市立安南醫院-委託中國醫藥大學興建經營','臺南市','醫院評鑑合格（區域醫院）'),
+('臺灣基督教門諾會醫療財團法人門諾醫院','花蓮縣','醫院評鑑合格（區域醫院）'),
+('輔仁大學學校財團法人輔仁大學附設醫院','新北市','醫院評鑑合格（區域醫院）'),
+('輔英科技大學附設醫院','屏東縣','醫院評鑑合格（區域醫院）'),
+('澄清綜合醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('澄清綜合醫院中港分院','臺中市','醫院評鑑合格（區域醫院）'),
+('衛生福利部南投醫院及其中興院區','南投縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部屏東醫院','屏東縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部苗栗醫院','苗栗縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部桃園醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('衛生福利部胸腔病院','臺南市','醫院評鑑合格（地區醫院）'),
+('衛生福利部基隆醫院','基隆市','醫院評鑑合格（區域醫院）'),
+('衛生福利部嘉義醫院','嘉義市','醫院評鑑合格（地區醫院）'),
+('衛生福利部彰化醫院','彰化縣','醫院評鑑合格（區域醫院）'),
+('衛生福利部旗山醫院','高雄市','醫院評鑑合格（地區醫院）'),
+('衛生福利部臺中醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('衛生福利部臺北醫院','新北市','醫院評鑑合格（區域醫院）'),
+('衛生福利部臺南醫院','臺南市','醫院評鑑合格（區域醫院）'),
+('衛生福利部樂生療養院','新北市','醫院評鑑合格（地區醫院）'),
+('衛生福利部豐原醫院','臺中市','醫院評鑑合格（區域醫院）'),
+('衛生福利部雙和醫院(委託臺北醫學大學興建經營)','新北市','醫院評鑑優等（醫學中心）'),
+('戴德森醫療財團法人嘉義基督教醫院','嘉義市','醫院評鑑合格（區域醫院）'),
+('聯新國際醫院','桃園市','醫院評鑑合格（區域醫院）'),
+('醫療財團法人徐元智先生醫藥基金會亞東紀念醫院','新北市','醫院評鑑優等（醫學中心）'),
+('醫療財團法人辜公亮基金會和信治癌中心醫院','臺北市','醫院評鑑合格（區域醫院）'),
+('醫療財團法人羅許基金會羅東博愛醫院','宜蘭縣','醫院評鑑合格（區域醫院）'),
+('寶建醫療社團法人寶建醫院','屏東縣','醫院評鑑合格（區域醫院）');
+-- END HOSPITAL DIRECTORY
+
+create or replace function public.nptc_schema_version() returns bigint
+language plpgsql stable security definer set search_path='' as $$
+begin
+ if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
+ return (select max(version) from nptc_private.schema_migrations);
+end;$$;
+create or replace function public.nptc_hospital_directory() returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+begin
+ if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
+ return jsonb_build_object('hospitals',(select coalesce(jsonb_agg(to_jsonb(h) order by city,name),'[]'::jsonb) from nptc_private.hospital_directory h));
+end;$$;
+
+-- 所有題目寫入經同一支函式；版本檢查防止舊草稿覆寫其他人的修改。
+create or replace function public.nptc_teacher_save_stations_v3(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare w nptc_private.workshops; item jsonb; old_item jsonb; seen text[]:='{}'; v_station_key text; cleaned jsonb:='[]';
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'stations') is distinct from 'array'
+ or jsonb_typeof(body-&gt;'stationsRevision') is distinct from 'number' or (body-&gt;&gt;'stationsRevision') !~ '^[0-9]+$' then
+  raise exception '請重新載入最新版題目設定後再儲存。';
+ end if;
+ if jsonb_array_length(body-&gt;'stations')=0 then raise exception '請至少新增一題 OSCE 題目。'; end if;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ if w.id is null then raise exception '找不到此梯次。'; end if;
+ if w.archived_at is not null then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if w.stations_revision&lt;&gt;(body-&gt;&gt;'stationsRevision')::integer then raise exception '題目設定已被其他人更新，請重新載入後再編輯。'; end if;
+ for item in select value from jsonb_array_elements(body-&gt;'stations') loop
+  v_station_key=trim(item-&gt;&gt;'key');
+  if jsonb_typeof(item-&gt;'key') is distinct from 'string' or coalesce(length(v_station_key),0) not between 1 and 100 or v_station_key=any(seen)
+  or jsonb_typeof(item-&gt;'title') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'title')),0) not between 1 and 100
+  or jsonb_typeof(item-&gt;'testDate') is distinct from 'string' or coalesce(item-&gt;&gt;'testDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  or jsonb_typeof(item-&gt;'complaint') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'complaint')),0) not between 1 and 300
+  or jsonb_typeof(item-&gt;'diagnosis') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'diagnosis')),0) not between 1 and 300
+  or jsonb_typeof(item-&gt;'prompt') is distinct from 'string' or coalesce(length(trim(item-&gt;&gt;'prompt')),0) not between 1 and 2000 then
+   raise exception '每題須完成題目名稱、有效日期、主訴、診斷與命題摘要。';
+  end if;
+  perform (item-&gt;&gt;'testDate')::date;
+  select value into old_item from jsonb_array_elements(w.stations) where value-&gt;&gt;'key'=v_station_key;
+  if item-&gt;'domainMax' is not null and item-&gt;'domainMax'&lt;&gt;'null'::jsonb then perform nptc_private.validate_domain_max(item-&gt;'domainMax');
+  elsif old_item is null or coalesce(length(trim(old_item-&gt;&gt;'title')),0)=0 or (old_item-&gt;'domainMax' is not null and old_item-&gt;'domainMax'&lt;&gt;'null'::jsonb) then
+   raise exception '新題目或已設定配分的題目必須填寫五面向滿分。';
+  end if;
+  if exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=v_station_key) and item is distinct from old_item then
+   raise exception '請先撤回本題公告，再修改題目。';
+  end if;
+  if old_item-&gt;'domainMax' is distinct from item-&gt;'domainMax' and exists(select 1 from nptc_private.station_grades g join nptc_private.students s on s.id=g.student_id
+   where s.workshop_id=w.id and g.station_key=v_station_key and g.domain_scores is not null) then raise exception '已有分項成績，不能變更配分；請建立新題目。'; end if;
+  seen=array_append(seen,v_station_key);cleaned=cleaned||jsonb_build_array(item||jsonb_build_object('key',v_station_key));
+ end loop;
+ if exists(select 1 from jsonb_array_elements(w.published_stations) p where not(p-&gt;&gt;'key'=any(seen)))
+ or exists(select 1 from nptc_private.station_grades g join nptc_private.students s on s.id=g.student_id where s.workshop_id=w.id and (g.score is not null or g.feedback&lt;&gt;'') and not(g.station_key=any(seen))) then
+  raise exception '有成績、回饋或已公告的題目不可刪除。';
+ end if;
+ update nptc_private.workshops set stations=cleaned,stations_revision=stations_revision+1 where id=w.id;
+ return jsonb_build_object('ok',true,'stationsRevision',w.stations_revision+1);
+end;$$;
+create or replace function public.nptc_teacher_save_stations(body jsonb) returns jsonb
+language sql security definer set search_path='' as $$select public.nptc_teacher_save_stations_v3(body)$$;
+
+-- 名冊使用目前規則直接寫入，不再轉接保留的舊版函式。
+
+alter table nptc_private.students add column if not exists service_kind text not null default 'hospital' check(service_kind in ('hospital','custom_medical','non_medical','unemployed'));
+create or replace function nptc_private.validate_service_institution(body jsonb,allow_empty boolean default false) returns void
+language plpgsql set search_path='' as $$
+declare kind text:=coalesce(body-&gt;&gt;'serviceKind','hospital'); institution text:=trim(body-&gt;&gt;'hospital');
+begin
+ if kind not in ('hospital','custom_medical','non_medical','unemployed') or jsonb_typeof(body-&gt;'hospital') is distinct from 'string'
+ or length(institution)&gt;200 or (not allow_empty and coalesce(institution,'')='') then raise exception '請填寫服務機構，或勾選待業中。'; end if;
+ if kind='unemployed' then
+  if institution&lt;&gt;'目前待業中' or coalesce(trim(body-&gt;&gt;'unit'),'')&lt;&gt;'' then raise exception '待業中不需填寫服務機構與單位。'; end if;
+ elsif kind='hospital' and institution&lt;&gt;'' and not exists(select 1 from nptc_private.hospital_directory where name=institution) then
+  raise exception '請從官方醫院名冊選擇，或選擇清單中找不到並自行填寫。';
+ elsif kind in ('custom_medical','non_medical') and institution='' then raise exception '請填寫服務機構名稱。';
+ end if;
+end;$$;
+revoke all on function nptc_private.validate_service_institution(jsonb,boolean) from public,anon,authenticated;
+
+create or replace function public.nptc_teacher_write(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare action text:=body-&gt;&gt;'action';w nptc_private.workshops;s nptc_private.students;row_item jsonb;sid uuid;request_uuid uuid;request_record nptc_private.workshop_create_requests;affected integer;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ if action='saveStations' then return public.nptc_teacher_save_stations_v3(body); end if;
+ if action in ('publish','saveScores') then raise exception '請使用新版逐題公告與五面向成績表。'; end if;
+ if action='createWorkshop' then
+  if jsonb_typeof(body-&gt;'name') is distinct from 'string' or length(trim(body-&gt;&gt;'name')) not between 1 and 100
+  or jsonb_typeof(body-&gt;'requestId') is distinct from 'string' then raise exception '請完整輸入梯次名稱，並重新載入新版建立表單。'; end if;
+  request_uuid=(body-&gt;&gt;'requestId')::uuid;
+  insert into nptc_private.workshop_create_requests(admin_id,request_id,name,workshop_id)
+   values(auth.uid(),request_uuid,trim(body-&gt;&gt;'name'),gen_random_uuid()) on conflict do nothing;
+  get diagnostics affected=row_count;
+  select * into request_record from nptc_private.workshop_create_requests where admin_id=auth.uid() and request_id=request_uuid for update;
+  if request_record.name is distinct from trim(body-&gt;&gt;'name') then raise exception '上次建立請求的名稱不同，請先重新整理確認建立結果。'; end if;
+  if affected=0 and not exists(select 1 from nptc_private.workshops where id=request_record.workshop_id) then raise exception '先前建立的梯次已刪除，請重新建立。'; end if;
+  insert into nptc_private.workshops(id,name) values(request_record.workshop_id,request_record.name) on conflict(id) do nothing;
+  return jsonb_build_object('id',request_record.workshop_id);
+ end if;
+ if action is null or action not in ('saveStudent','deleteStudent','bulkImportStudents') then raise exception '不支援的操作。'; end if;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ if w.id is null then raise exception '找不到此梯次。'; end if;
+ if w.archived_at is not null then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if jsonb_array_length(w.published_stations)&gt;0 then raise exception '請先撤回本梯次所有題目公告，再修改名冊。'; end if;
+ if action='bulkImportStudents' then
+  if jsonb_typeof(body-&gt;'students') is distinct from 'array' or jsonb_array_length(body-&gt;'students')=0 then raise exception '請至少提供一位學員。'; end if;
+  for row_item in select value from jsonb_array_elements(body-&gt;'students') loop
+   if jsonb_typeof(row_item-&gt;'name') is distinct from 'string' or jsonb_typeof(row_item-&gt;'email') is distinct from 'string'
+    or jsonb_typeof(row_item-&gt;'phone') is distinct from 'string' or trim(row_item-&gt;&gt;'phone') !~ '^09[0-9]{8}$' then raise exception '請完整填寫姓名、Email 與有效手機。'; end if;
+   insert into nptc_private.students(workshop_id,name,email,phone,updated_by)
+    values(w.id,trim(row_item-&gt;&gt;'name'),lower(trim(row_item-&gt;&gt;'email')),trim(row_item-&gt;&gt;'phone'),auth.uid());
+  end loop;
+  return '{"ok":true}';
+ end if;
+ if body-&gt;&gt;'id' is not null then
+  if jsonb_typeof(body-&gt;'revision') is distinct from 'number' or (body-&gt;&gt;'revision') !~ '^[0-9]+$' then raise exception '資料版本不正確。'; end if;
+  select * into s from nptc_private.students where id=(body-&gt;&gt;'id')::uuid and workshop_id=w.id and revision=(body-&gt;&gt;'revision')::integer for update;
+  if s.id is null then raise exception '資料已更新或已被刪除，請重新載入。'; end if;
+ end if;
+ if action='deleteStudent' then
+  if s.id is null then raise exception '請指定欲刪除的學員。'; end if;
+  delete from nptc_private.students where id=s.id;
+ else
+  if jsonb_typeof(body-&gt;'name') is distinct from 'string' or jsonb_typeof(body-&gt;'email') is distinct from 'string'
+   or jsonb_typeof(body-&gt;'phone') is distinct from 'string' or trim(body-&gt;&gt;'phone') !~ '^09[0-9]{8}$' then raise exception '請完整填寫姓名、Email 與有效手機。'; end if;
+  if s.id is not null and s.email is distinct from lower(trim(body-&gt;&gt;'email')) and
+   (body ? 'profile' or exists(select 1 from auth.users where lower(email)=s.email) or exists(select 1 from nptc_private.student_accounts where email=s.email)) then
+   raise exception '已建立帳號的登入 Email 不可直接改名冊，請聯絡系統管理者處理。';
+  end if;
+  if s.id is null then
+   insert into nptc_private.students(workshop_id,name,email,phone,updated_by) values(w.id,trim(body-&gt;&gt;'name'),lower(trim(body-&gt;&gt;'email')),trim(body-&gt;&gt;'phone'),auth.uid());
+  else
+   update nptc_private.students set name=trim(body-&gt;&gt;'name'),email=lower(trim(body-&gt;&gt;'email')),phone=trim(body-&gt;&gt;'phone'),revision=revision+1,updated_at=now(),updated_by=auth.uid() where id=s.id;
+   if body ? 'profile' then
+    row_item=body-&gt;'profile';
+    if jsonb_typeof(row_item) is distinct from 'object'
+      or not row_item ?&amp; array['nursingYears','hospital','unit','examSpecialty','firstOsce','birthDate']
+      or (row_item-&gt;'nursingYears'&lt;&gt;'null'::jsonb and (jsonb_typeof(row_item-&gt;'nursingYears')&lt;&gt;'number' or (row_item-&gt;&gt;'nursingYears') !~ '^[0-9]+$' or (row_item-&gt;&gt;'nursingYears')::numeric not between 0 and 60))
+      or jsonb_typeof(row_item-&gt;'hospital') is distinct from 'string'
+      or jsonb_typeof(row_item-&gt;'unit') is distinct from 'string' or length(trim(row_item-&gt;&gt;'unit'))&gt;100
+      or jsonb_typeof(row_item-&gt;'examSpecialty') is distinct from 'string' or row_item-&gt;&gt;'examSpecialty' not in ('','內科','精神科','兒科','外科','婦產科','麻醉科','家庭科')
+      or jsonb_typeof(row_item-&gt;'firstOsce') not in ('boolean','null')
+      or jsonb_typeof(row_item-&gt;'birthDate') not in ('string','null')
+      then raise exception '請確認學員基本資料格式。'; end if;
+    perform nptc_private.validate_service_institution(row_item,true);
+    if row_item-&gt;&gt;'birthDate' is not null and ((row_item-&gt;&gt;'birthDate') !~ '^\d{4}-\d{2}-\d{2}$' or (row_item-&gt;&gt;'birthDate')::date not between date '1900-01-01' and current_date) then raise exception '請確認出生年月日。'; end if;
+    update nptc_private.students set nursing_years=(row_item-&gt;&gt;'nursingYears')::integer,
+      service_kind=coalesce(row_item-&gt;&gt;'serviceKind','hospital'),hospital=nullif(trim(row_item-&gt;&gt;'hospital'),''),unit=nullif(trim(row_item-&gt;&gt;'unit'),''),exam_specialty=nullif(row_item-&gt;&gt;'examSpecialty',''),
+      first_osce=(row_item-&gt;&gt;'firstOsce')::boolean,birth_date=(row_item-&gt;&gt;'birthDate')::date where id=s.id;
+   end if;
+  end if;
+ end if;
+ return '{"ok":true}';
+exception when unique_violation then raise exception '此梯次已有相同的手機電話或 Email。';
+ when check_violation or not_null_violation then raise exception '請確認姓名、Email 與手機電話格式。';
+end;$$;
+
+create or replace function public.nptc_teacher_publish_station(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare w nptc_private.workshops;station text:=body-&gt;&gt;'station';should_publish boolean;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'published') is distinct from 'boolean' then raise exception '公布狀態不正確。'; end if;
+ should_publish=(body-&gt;&gt;'published')::boolean;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ if w.id is null then raise exception '找不到此梯次。'; end if;
+ if w.archived_at is not null then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if not exists(select 1 from jsonb_array_elements(w.stations) x where x-&gt;&gt;'key'=station) then raise exception '找不到指定題目。'; end if;
+ if should_publish and not exists(select 1 from nptc_private.station_grades g join nptc_private.students s on s.id=g.student_id where s.workshop_id=w.id and g.station_key=station and g.score is not null) then raise exception '本題至少要有一筆已登錄成績才能公布。'; end if;
+ update nptc_private.workshops set published_stations=case when should_publish then
+  (select coalesce(jsonb_agg(distinct jsonb_build_object('key',v)),'[]'::jsonb) from unnest(array_append(array(select p-&gt;&gt;'key' from jsonb_array_elements(published_stations) p),station)) v)
+ else (select coalesce(jsonb_agg(p),'[]'::jsonb) from jsonb_array_elements(published_stations) p where p-&gt;&gt;'key'&lt;&gt;station) end,
+ published=0,stations_revision=stations_revision+1 where id=w.id;
+ return '{"ok":true}';
+end;$$;
+
+create or replace function public.nptc_student_update_profile(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not public.nptc_is_teacher() and not exists(select 1 from nptc_private.student_accounts where user_id=auth.uid() and email=e) then raise exception '請先核對學員名冊。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'nursingYears') is distinct from 'number' or (body-&gt;&gt;'nursingYears')::numeric not between 0 and 60
+ or (body-&gt;&gt;'nursingYears')::numeric&lt;&gt;trunc((body-&gt;&gt;'nursingYears')::numeric) or jsonb_typeof(body-&gt;'firstOsce') is distinct from 'boolean'
+ or jsonb_typeof(body-&gt;'hospital') is distinct from 'string' or jsonb_typeof(body-&gt;'unit') is distinct from 'string'
+ or coalesce(length(trim(body-&gt;&gt;'unit')),0) not between 0 and 100
+ or coalesce(body-&gt;&gt;'examSpecialty','') not in ('內科','精神科','兒科','外科','婦產科','麻醉科','家庭科')
+ or coalesce(body-&gt;&gt;'birthDate','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then raise exception '請完整填寫有效的個人資料。'; end if;
+ perform nptc_private.validate_service_institution(body);
+ if (body-&gt;&gt;'birthDate')::date&gt;current_date or (body-&gt;&gt;'birthDate')::date&lt;date '1900-01-01' then raise exception '請確認出生年月日。'; end if;
+ update nptc_private.students s set nursing_years=(body-&gt;&gt;'nursingYears')::integer,service_kind=coalesce(body-&gt;&gt;'serviceKind','hospital'),hospital=trim(body-&gt;&gt;'hospital'),unit=trim(body-&gt;&gt;'unit'),
+ exam_specialty=body-&gt;&gt;'examSpecialty',first_osce=(body-&gt;&gt;'firstOsce')::boolean,birth_date=(body-&gt;&gt;'birthDate')::date,updated_at=now(),updated_by=auth.uid()
+ where s.email=e and exists(select 1 from nptc_private.workshops w where w.id=s.workshop_id and w.archived_at is null);
+ if not found then raise exception '目前沒有可更新的未封存學員名冊，請聯絡管理員。'; end if;
+ return '{"ok":true}';
+end;$$;
+
+-- Email 變更須先由 Auth 完成信箱確認，再依相同 user_id 同步歷史名冊。
+create or replace function nptc_private.reject_archived_workshop_change() returns trigger
+language plpgsql set search_path='' as $$
+declare target uuid;
+begin
+ if TG_OP='DELETE' and current_setting('nptc.delete_archived_workshop',true)='on' then return old; end if;
+ if TG_TABLE_NAME='workshops' then
+  if TG_OP='DELETE' then raise exception '請先封存梯次，再由系統管理者刪除。'; end if;
+  if old.archived_at is not null and (new.archived_at is not null or (new.name,new.published,new.stations,new.published_stations,new.stations_revision)
+   is distinct from (old.name,old.published,old.stations,old.published_stations,old.stations_revision)) then raise exception '封存梯次不可修改，請先還原。'; end if;
+  return new;
+ end if;
+ if TG_TABLE_NAME='students' then
+  if TG_OP='UPDATE' and current_setting('nptc.student_email_sync',true)=auth.uid()::text and new.email=lower(auth.jwt()-&gt;&gt;'email')
+   and old.email is distinct from new.email and (to_jsonb(new)-array['email','revision','updated_at','updated_by']) is not distinct from (to_jsonb(old)-array['email','revision','updated_at','updated_by']) then return new; end if;
+  target=case when TG_OP='DELETE' then old.workshop_id else new.workshop_id end;
+ else select s.workshop_id into target from nptc_private.students s where s.id=case when TG_OP='DELETE' then old.student_id else new.student_id end; end if;
+ if exists(select 1 from nptc_private.workshops w where w.id=target and w.archived_at is not null) then raise exception '封存梯次不可修改，請先還原。'; end if;
+ if TG_OP='DELETE' then return old; end if;
+ return new;
+end;$$;
+create or replace function public.nptc_sync_student_email() returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();previous text;
+begin
+ select email into previous from nptc_private.student_accounts where user_id=auth.uid() for update;
+ if previous is null or previous=e then return '{"ok":true}'; end if;
+ if exists(select 1 from nptc_private.teachers where email in(previous,e)) then raise exception '後臺帳號的 Email 變更請聯絡系統管理者。'; end if;
+ perform set_config('nptc.student_email_sync',auth.uid()::text,true);
+ update nptc_private.students set email=e,revision=revision+1,updated_at=now(),updated_by=auth.uid() where email=previous;
+ update nptc_private.student_accounts set email=e where user_id=auth.uid();
+ insert into nptc_private.student_email_changes(user_id,previous_email,new_email) values(auth.uid(),previous,e);
+ perform set_config('nptc.student_email_sync','',true);
+ return '{"ok":true}';
+exception when unique_violation then raise exception '新 Email 與既有名冊衝突，請聯絡系統管理者核對，原紀錄仍保留。';
+end;$$;
+
+-- BEGIN CURRENT READ FUNCTIONS
+create or replace function nptc_private.teacher_data(requested_workshop uuid default null,include_archived boolean default false) returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare selected nptc_private.workshops; items jsonb; roster jsonb;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有一般管理員權限。' using errcode='42501'; end if;
+ select coalesce(jsonb_agg(to_jsonb(w) || jsonb_build_object('publishedStations',coalesce((select jsonb_agg(p-&gt;&gt;'key') from jsonb_array_elements(w.published_stations) p),'[]'::jsonb)) order by w.created_at desc,w.id),'[]'::jsonb)
+  into items from nptc_private.workshops w where (include_archived or w.archived_at is null);
+ select * into selected from nptc_private.workshops w where (include_archived or w.archived_at is null)
+  order by (w.id=requested_workshop) desc nulls last,w.created_at desc,w.id limit 1;
+ select coalesce(jsonb_agg(to_jsonb(s) || coalesce((select jsonb_object_agg(g.station_key||'_domains',g.domain_scores) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) || jsonb_build_object('account_registered',exists(select 1 from auth.users u where lower(trim(u.email))=lower(trim(s.email))),'account_activated_at',(select a.activated_at from nptc_private.student_accounts a join auth.users u on u.id=a.user_id and lower(trim(u.email))=lower(trim(a.email)) where lower(trim(a.email))=lower(trim(s.email)) limit 1)) || coalesce((select jsonb_object_agg(g.station_key||'_score',g.score) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) || coalesce((select jsonb_object_agg(g.station_key||'_rating',g.rating) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) || coalesce((select jsonb_object_agg(g.station_key||'_feedback',g.feedback) from nptc_private.station_grades g where g.student_id=s.id),'{}'::jsonb) order by s.phone,s.name),'[]'::jsonb)
+  into roster from nptc_private.students s where s.workshop_id=selected.id;
+ return jsonb_build_object('includesArchived',include_archived,'workshops',items,'selected',case when selected.id is null then null else to_jsonb(selected) || jsonb_build_object('publishedStations',coalesce((select jsonb_agg(p-&gt;&gt;'key') from jsonb_array_elements(selected.published_stations) p),'[]'::jsonb)) end,'students',roster,'thresholds',case when selected.id is null then '[]'::jsonb else nptc_private.dynamic_thresholds(selected.id) end);
+end;$$;
+
+
+create or replace function public.nptc_teacher_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,false)$$;
+create or replace function public.nptc_analysis_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,public.nptc_is_account_reviewer())$$;
+revoke all on function nptc_private.teacher_data(uuid,boolean) from public,anon,authenticated;
+revoke all on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) from public,anon;
+grant execute on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) to authenticated;
+
+create or replace function public.nptc_student_onboarding_status() returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity(); a nptc_private.student_accounts; s nptc_private.students;
+begin
+ select * into a from nptc_private.student_accounts where user_id=auth.uid() and email=e;
+ if a.user_id is null then return jsonb_build_object('stage','unclaimed'); end if;
+ select student.* into s from nptc_private.students student join nptc_private.workshops w on w.id=student.workshop_id where student.email=e order by (w.archived_at is null) desc,student.updated_at desc nulls last,student.id limit 1;
+ if s.id is null then raise exception '目前沒有您的學員名冊，請聯絡管理員。'; end if;
+ return jsonb_build_object('stage',case when a.activated_at is null then 'profile' else 'active' end,
+ 'student',jsonb_build_object('name',s.name,'email',s.email,'phone',s.phone,
+ 'serviceKind',s.service_kind,'nursingYears',s.nursing_years,'hospital',s.hospital,'unit',s.unit,
+ 'examSpecialty',s.exam_specialty,'firstOsce',s.first_osce,'birthDate',s.birth_date));
+end;$$;
+
+create or replace function public.nptc_claim_student(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not exists(select 1 from nptc_private.students where email=e and trim(name)=trim(body-&gt;&gt;'name')
+  and regexp_replace(phone,'[[:space:]-]','','g')=regexp_replace(body-&gt;&gt;'phone','[[:space:]-]','','g')
+  and length(coalesce(body-&gt;&gt;'phone',''))&gt;=10) then
+  raise exception '姓名、Email 與手機未能對應名冊，請確認資料或聯絡管理員。';
+ end if;
+ insert into nptc_private.student_accounts(user_id,email) values(auth.uid(),e)
+ on conflict(user_id) do nothing;
+ return public.nptc_student_onboarding_status();
+end;$$;
+
+create or replace function public.nptc_student_data() returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not public.nptc_is_teacher() and not exists(select 1 from nptc_private.student_accounts
+ where user_id=auth.uid() and email=e and activated_at is not null) then
+  raise exception '請先完成首次啟用、個人資料與密碼設定。' using errcode='42501';
+ end if;
+ return nptc_private.student_data_before_activation();
+end;$$;
+
+create or replace function public.nptc_finish_student_activation() returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare e text:=nptc_private.student_identity();
+begin
+ if not exists(select 1 from auth.users where id=auth.uid() and length(encrypted_password)&gt;0) then
+  raise exception '請先設定登入密碼。';
+ end if;
+ if not exists(select 1 from nptc_private.students where email=e and nursing_years is not null
+  and length(trim(hospital))&gt;0 and exam_specialty is not null
+  and first_osce is not null and birth_date between date '1900-01-01' and current_date) then
+  raise exception '請先完整填寫個人資料。';
+ end if;
+ update nptc_private.student_accounts set activated_at=coalesce(activated_at,now()) where user_id=auth.uid() and email=e;
+ if not found then raise exception '請先核對學員名冊。'; end if;
+ return '{"ok":true}';
+end;$$;
+
+create or replace function nptc_private.student_data_before_activation() returns jsonb language plpgsql stable security definer set search_path='' as $$
+declare result jsonb;
+begin
+ if auth.uid() is null then raise exception '請先登入。' using errcode='42501'; end if;
+ select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'email',s.email,'phone',s.phone,'workshopName',w.name,'archived',w.archived_at is not null,'published',case when jsonb_array_length(w.published_stations)&gt;0 then 1 else 0 end,'profile',jsonb_build_object('serviceKind',s.service_kind,'nursingYears',s.nursing_years,'hospital',coalesce(s.hospital,''),'unit',coalesce(s.unit,''),'examSpecialty',coalesce(s.exam_specialty,''),'firstOsce',s.first_osce,'birthDate',coalesce(s.birth_date::text,'')),'stations',coalesce((select jsonb_agg(x.value order by x.ordinality) from jsonb_array_elements(w.stations) with ordinality x(value,ordinality) where exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=x.value-&gt;&gt;'key')),'[]'::jsonb),'updatedAt',s.updated_at,'grades',coalesce((select jsonb_agg(jsonb_build_object('key',g.station_key,'score',g.score,'rating',g.rating,'feedback',g.feedback,'domains',g.domain_scores)) from nptc_private.station_grades g where g.student_id=s.id and exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=g.station_key)),'[]'::jsonb),'thresholds',nptc_private.dynamic_thresholds(w.id,true)) order by w.created_at desc,w.id),'[]'::jsonb) into result from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id where s.email=lower(auth.jwt()-&gt;&gt;'email');
+ return jsonb_build_object('records',result);
+end;$$;
+
+create or replace function public.nptc_teacher_batch_scores_v3(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare w nptc_private.workshops; item jsonb; v_station_key text:=body-&gt;&gt;'station'; definition jsonb; total numeric; rating_value integer; domains jsonb; affected integer; seen uuid[]:='{}'; student_uuid uuid;
+begin
+ if not public.nptc_is_teacher() then raise exception '此帳號沒有老師權限。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'items') is distinct from 'array' then raise exception '成績資料格式不正確。'; end if;
+ if jsonb_array_length(body-&gt;'items')=0 then raise exception '請選擇要儲存的學員。'; end if;
+ select * into w from nptc_private.workshops where id=(body-&gt;&gt;'workshopId')::uuid for update;
+ select value into definition from jsonb_array_elements(w.stations) where value-&gt;&gt;'key'=v_station_key;
+ if definition is null then raise exception '找不到指定題目。'; end if;
+ perform nptc_private.validate_domain_max(definition-&gt;'domainMax');
+ if exists(select 1 from jsonb_array_elements(w.published_stations) p where p-&gt;&gt;'key'=v_station_key) then raise exception '請先撤回本題公告，再修改成績。'; end if;
+ for item in select value from jsonb_array_elements(body-&gt;'items') loop
+  if jsonb_typeof(item-&gt;'id') is distinct from 'string' or jsonb_typeof(item-&gt;'revision') is distinct from 'number' or not(item ? 'domains') or not(item ? 'rating') then raise exception '請使用五面向成績表完整輸入。'; end if;
+  if (item-&gt;&gt;'revision')::numeric&lt;&gt;trunc((item-&gt;&gt;'revision')::numeric) then raise exception '資料版本不正確。'; end if;
+  student_uuid=(item-&gt;&gt;'id')::uuid;
+  if student_uuid=any(seen) then raise exception '批次學員不可重複。'; end if;
+  seen=array_append(seen,student_uuid);
+  domains=item-&gt;'domains';
+  if domains='null'::jsonb and item-&gt;'rating'='null'::jsonb then total=null;rating_value=null;domains=null;
+  else
+   total=nptc_private.domain_score_total(domains,definition-&gt;'domainMax');
+   if jsonb_typeof(item-&gt;'rating') is distinct from 'number' then raise exception 'Global Rating 須為 1–5 的整數。'; end if;
+   if (item-&gt;&gt;'rating')::numeric not between 1 and 5 or (item-&gt;&gt;'rating')::numeric&lt;&gt;trunc((item-&gt;&gt;'rating')::numeric) then raise exception 'Global Rating 須為 1–5 的整數。'; end if;
+   rating_value=(item-&gt;&gt;'rating')::integer;
+  end if;
+  update nptc_private.students set revision=revision+1,updated_at=now(),updated_by=auth.uid() where id=student_uuid and workshop_id=w.id and revision=(item-&gt;&gt;'revision')::integer;
+  get diagnostics affected=row_count;
+  if affected=0 then raise exception '學員不在本梯次或資料已更新，請重新載入。'; end if;
+  insert into nptc_private.station_grades(student_id,station_key,score,rating,domain_scores,feedback,updated_at,updated_by)
+  values(student_uuid,v_station_key,total,rating_value,domains,trim(coalesce(item-&gt;&gt;'feedback','')),now(),auth.uid())
+  on conflict(student_id,station_key) do update set score=excluded.score,rating=excluded.rating,domain_scores=excluded.domain_scores,feedback=excluded.feedback,updated_at=excluded.updated_at,updated_by=excluded.updated_by;
+ end loop;
+ return '{"ok":true}';
+end;$$;
+
+create or replace function public.nptc_teacher_batch_scores_v2(body jsonb) returns jsonb language sql security definer set search_path='' as $$select public.nptc_teacher_batch_scores_v3(body)$$;
+
+create or replace function public.nptc_verify_student_roster(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare normalized_email text := lower(trim(body-&gt;&gt;'email')); attempt_count integer;
+begin
+ if coalesce(normalized_email,'')='' then return jsonb_build_object('ok',false); end if;
+ insert into nptc_private.activation_attempts as a(email_hash,attempts,started_at)
+ values(encode(sha256(convert_to(normalized_email,'UTF8')),'hex'),1,now())
+ on conflict(email_hash) do update set
+ attempts=case when a.started_at &lt; now()-interval '1 hour' then 1 else a.attempts+1 end,
+ started_at=case when a.started_at &lt; now()-interval '1 hour' then now() else a.started_at end
+ returning attempts into attempt_count;
+ if attempt_count&gt;5 then return jsonb_build_object('ok',false); end if;
+ if exists(select 1 from nptc_private.students s
+  where lower(trim(s.email))=normalized_email and trim(s.name)=trim(body-&gt;&gt;'name')
+  and s.phone=body-&gt;&gt;'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$')
+  and exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false,'code',case when exists(
+   select 1 from nptc_private.student_accounts a join auth.users u on u.id=a.user_id
+   where lower(a.email)=normalized_email and lower(u.email)=normalized_email and a.activated_at is not null
+  ) then 'already_activated' else 'account_exists' end);
+ end if;
+ if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false);
+ end if;
+ if not exists(select 1 from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id
+   where w.archived_at is null and lower(trim(s.email))=normalized_email and trim(s.name)=trim(body-&gt;&gt;'name')
+  and s.phone=body-&gt;&gt;'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$') then
+  return jsonb_build_object('ok',false);
+ end if;
+ return jsonb_build_object('ok',true,'email',normalized_email);
+end; $$;
+
+create or replace function nptc_private.require_fresh_admin_password() returns void
+language plpgsql security definer set search_path='' as $$
+declare session_key text:=auth.jwt()-&gt;&gt;'session_id'; password_at timestamptz;
+begin
+ if not public.nptc_is_account_reviewer() then
+  raise exception '只有系統管理者可執行此操作。' using errcode='42501';
+ end if;
+ select to_timestamp((method-&gt;&gt;'timestamp')::double precision) into password_at
+ from jsonb_array_elements(coalesce(auth.jwt()-&gt;'amr','[]'::jsonb)) method
+ where method-&gt;&gt;'method'='password' and jsonb_typeof(method-&gt;'timestamp')='number'
+ order by (method-&gt;&gt;'timestamp')::double precision desc limit 1;
+ if coalesce(session_key,'')='' or password_at is null
+  or password_at &lt; now()-interval '2 minutes' or password_at &gt; now()+interval '30 seconds' then
+  raise exception '請重新輸入系統管理者帳號與密碼。' using errcode='42501';
+ end if;
+ delete from nptc_private.workshop_action_sessions where used_at &lt; now()-interval '7 days';
+ insert into nptc_private.workshop_action_sessions(session_id,admin_id) values(session_key,auth.uid())
+ on conflict do nothing;
+ if not found then
+  raise exception '本次密碼驗證已使用，請重新輸入帳號與密碼。' using errcode='42501';
+ end if;
+end;$$;
+
+create or replace function public.nptc_set_workshop_archived(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare target uuid; archive boolean;
+begin
+ if not public.nptc_is_account_reviewer() then raise exception '只有系統管理者可封存或還原梯次。' using errcode='42501'; end if;
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'archived') is distinct from 'boolean' then raise exception '梯次資料不正確。'; end if;
+ target=(body-&gt;&gt;'workshopId')::uuid; archive=(body-&gt;&gt;'archived')::boolean;
+ if archive then perform nptc_private.require_fresh_admin_password(); end if;
+ update nptc_private.workshops set archived_at=case when archive then now() else null end
+  where id=target and (archived_at is null)=archive;
+ if not found then raise exception '梯次不存在或狀態已變更，請重新整理。'; end if;
+ return '{"ok":true}'::jsonb;
+end;$$;
+
+create or replace function public.nptc_delete_archived_workshop(body jsonb) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare target uuid; actual_name text;
+begin
+ if jsonb_typeof(body-&gt;'workshopId') is distinct from 'string' or jsonb_typeof(body-&gt;'name') is distinct from 'string' then
+  raise exception '梯次資料不正確。';
+ end if;
+ target=(body-&gt;&gt;'workshopId')::uuid;
+ perform nptc_private.require_fresh_admin_password();
+ select name into actual_name from nptc_private.workshops where id=target and archived_at is not null for update;
+ if not found then raise exception '只能刪除已封存的梯次，請重新整理。'; end if;
+ if body-&gt;&gt;'name' is distinct from actual_name then raise exception '梯次名稱不符，請重新確認。'; end if;
+ perform set_config('nptc.delete_archived_workshop','on',true);
+ delete from nptc_private.station_grades g using nptc_private.students s
+  where g.student_id=s.id and s.workshop_id=target;
+ delete from nptc_private.students where workshop_id=target;
+ delete from nptc_private.workshops where id=target;
+ perform set_config('nptc.delete_archived_workshop','off',true);
+ return '{"ok":true}'::jsonb;
+end;$$;
+-- END CURRENT READ FUNCTIONS
+
+-- 明確關閉已廢止的入口，保留現行批次成績 RPC 的完整驗證。
+do $$ begin
+ if to_regprocedure('public.nptc_issue_student_invitation(uuid)') is not null then execute 'revoke all on function public.nptc_issue_student_invitation(uuid) from public,anon,authenticated'; end if;
+ if to_regprocedure('public.nptc_consume_student_invitation(jsonb)') is not null then execute 'revoke all on function public.nptc_consume_student_invitation(jsonb) from public,anon,authenticated,service_role'; end if;
+ if to_regprocedure('nptc_private.teacher_write_before_domains(jsonb)') is not null then execute 'revoke all on function nptc_private.teacher_write_before_domains(jsonb) from public,anon,authenticated'; end if;
+ if to_regprocedure('public.nptc_teacher_batch_scores(jsonb)') is not null then execute 'revoke all on function public.nptc_teacher_batch_scores(jsonb) from public,anon,authenticated'; end if;
+end;$$;
+revoke all on function public.nptc_verify_student_roster(jsonb) from public,anon,authenticated;
+grant execute on function public.nptc_verify_student_roster(jsonb) to service_role;
+revoke all on function public.nptc_teacher_batch_scores_v2(jsonb),public.nptc_teacher_batch_scores_v3(jsonb),
+public.nptc_student_onboarding_status(),public.nptc_claim_student(jsonb),public.nptc_student_data(),public.nptc_finish_student_activation(),
+public.nptc_set_workshop_archived(jsonb),public.nptc_delete_archived_workshop(jsonb) from public,anon;
+grant execute on function public.nptc_teacher_batch_scores_v2(jsonb),public.nptc_teacher_batch_scores_v3(jsonb),
+public.nptc_student_onboarding_status(),public.nptc_claim_student(jsonb),public.nptc_student_data(),public.nptc_finish_student_activation(),
+public.nptc_set_workshop_archived(jsonb),public.nptc_delete_archived_workshop(jsonb) to authenticated;
+revoke all on function nptc_private.require_fresh_admin_password() from public,anon,authenticated;
+revoke all on function public.nptc_schema_version(),public.nptc_hospital_directory(),public.nptc_sync_student_email(),public.nptc_teacher_write(jsonb),
+ public.nptc_teacher_save_stations_v3(jsonb),public.nptc_teacher_save_stations(jsonb),public.nptc_teacher_publish_station(jsonb) from public,anon;
+grant execute on function public.nptc_schema_version(),public.nptc_hospital_directory(),public.nptc_sync_student_email(),public.nptc_teacher_write(jsonb),
+ public.nptc_teacher_save_stations_v3(jsonb),public.nptc_teacher_save_stations(jsonb),public.nptc_teacher_publish_station(jsonb) to authenticated;
+revoke all on function nptc_private.reject_archived_workshop_change() from public,anon,authenticated;
+insert into nptc_private.schema_migrations(version) values(2026100701) on conflict do nothing;
+notify pgrst,'reload schema';
+commit;
+</pre></details><h2>scripts/build-supabase.mjs</h2><details><summary>修改前完整檔案</summary><pre>import { readFile, writeFile } from 'node:fs/promises';
+
+export const baseline = ['setup','upgrade-workshop-management','upgrade-score-feedback','upgrade-student-phone',
+  'upgrade-student-profile','upgrade-dynamic-osce-stations','upgrade-backend-accounts','upgrade-student-activation',
+  'upgrade-roster-account-status','upgrade-domain-scores','upgrade-student-roster-activation','upgrade-admin-roles','upgrade-workshop-sensitive-actions'];
+const files = Object.fromEntries(await Promise.all(baseline.map(async name =&gt; [name,(await readFile(`supabase/${name}.sql`,'utf8')).replace(/\r\n/g,'\n')])));
+const extract = (name,fn) =&gt; {
+  const expression = new RegExp(`create or replace function ${fn.replace(/[.*+?^${}()|[\]\\]/g,'\\$&amp;')}\\([\\s\\S]*?end;\\s*\\$\\$;`, 'i');
+  const match = files[name].match(expression);
+  if (!match) throw new Error(`Cannot find ${fn} in ${name}`);
+  return match[0];
+};
+const sqlString = value =&gt; `'${String(value).replaceAll("'","''")}'`;
+const directory = JSON.parse(await readFile('public/data/accredited-hospitals.json','utf8'));
+if (!Array.isArray(directory.hospitals) || !directory.hospitals.length) throw new Error('Missing hospital directory');
+const hospitals = [...new Map(directory.hospitals.map(h=&gt;[h.name,h])).values()].sort((a,b)=&gt;a.name.localeCompare(b.name,'zh-Hant'));
+const seed = `delete from nptc_private.hospital_directory;\ninsert into nptc_private.hospital_directory(name,city,level) values\n${hospitals.map(h=&gt;`(${[h.name,h.city,h.level].map(sqlString).join(',')})`).join(',\n')};`;
+
+let teacherRead = extract('upgrade-admin-roles','public.nptc_teacher_data')
+  .replace('public.nptc_teacher_data(requested_workshop uuid default null)','nptc_private.teacher_data(requested_workshop uuid default null,include_archived boolean default false)')
+  .replaceAll('where w.archived_at is null','where (include_archived or w.archived_at is null)')
+  .replace("jsonb_build_object('workshops',items", "jsonb_build_object('includesArchived',include_archived,'workshops',items");
+const readWrappers = `
+create or replace function public.nptc_teacher_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,false)$$;
+create or replace function public.nptc_analysis_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,public.nptc_is_account_reviewer())$$;
+revoke all on function nptc_private.teacher_data(uuid,boolean) from public,anon,authenticated;
+revoke all on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) from public,anon;
+grant execute on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) to authenticated;`;
+const onboarding = extract('upgrade-student-activation','public.nptc_student_onboarding_status').replace(
+  'select * into s from nptc_private.students where email=e order by updated_at desc nulls last,id limit 1;',
+  'select student.* into s from nptc_private.students student join nptc_private.workshops w on w.id=student.workshop_id where student.email=e order by (w.archived_at is null) desc,student.updated_at desc nulls last,student.id limit 1;');
+let verifyRoster = extract('upgrade-student-roster-activation','public.nptc_verify_student_roster').replace(
+  /from nptc_private\.students s\s+where/, 'from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id\n   where w.archived_at is null and');
+// Existing account guidance requires all roster identifiers, including historical workshops.
+verifyRoster = verifyRoster.replace(" if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then", () =&gt; ` if exists(select 1 from nptc_private.students s
+  where lower(trim(s.email))=normalized_email and trim(s.name)=trim(body-&gt;&gt;'name')
+  and s.phone=body-&gt;&gt;'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$')
+  and exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false,'code',case when exists(
+   select 1 from nptc_private.student_accounts a join auth.users u on u.id=a.user_id
+   where lower(a.email)=normalized_email and lower(u.email)=normalized_email and a.activated_at is not null
+  ) then 'already_activated' else 'account_exists' end);
+ end if;
+ if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then`);
+const studentRead = extract('upgrade-domain-scores','nptc_private.student_data_before_activation').replace(
+  "'workshopName',w.name,'published'", "'workshopName',w.name,'archived',w.archived_at is not null,'published'");
+const current = [teacherRead,readWrappers,onboarding,
+  extract('upgrade-student-activation','public.nptc_claim_student'),
+  extract('upgrade-student-activation','public.nptc_student_data'),
+  extract('upgrade-student-activation','public.nptc_finish_student_activation'),
+  studentRead,
+  extract('upgrade-domain-scores','public.nptc_teacher_batch_scores_v3'),
+  `create or replace function public.nptc_teacher_batch_scores_v2(body jsonb) returns jsonb language sql security definer set search_path='' as $$select public.nptc_teacher_batch_scores_v3(body)$$;`,
+  verifyRoster,
+  extract('upgrade-workshop-sensitive-actions','nptc_private.require_fresh_admin_password'),
+  extract('upgrade-workshop-sensitive-actions','public.nptc_set_workshop_archived'),
+  extract('upgrade-workshop-sensitive-actions','public.nptc_delete_archived_workshop')].join('\n\n');
+let upgrade = await readFile('supabase/upgrade-project-consistency.sql','utf8');
+upgrade = upgrade.replace(/-- BEGIN HOSPITAL DIRECTORY[\s\S]*?-- END HOSPITAL DIRECTORY/,()=&gt;`-- BEGIN HOSPITAL DIRECTORY\n${seed}\n-- END HOSPITAL DIRECTORY`)
+  .replace(/-- BEGIN CURRENT READ FUNCTIONS[\s\S]*?-- END CURRENT READ FUNCTIONS/,()=&gt;`-- BEGIN CURRENT READ FUNCTIONS\n${current}\n-- END CURRENT READ FUNCTIONS`);
+await writeFile('supabase/upgrade-project-consistency.sql',upgrade);
+await writeFile('supabase/install.sql',`-- Generated by scripts/build-supabase.mjs. New database only.\n${baseline.map(name=&gt;`-- ${name}\n${files[name]}`).join('\n')}\n${upgrade}`);
+console.log(`Built SQL installation and current upgrade with ${hospitals.length} hospitals.`);
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { readFile, writeFile } from 'node:fs/promises';
+
+export const baseline = ['setup','upgrade-workshop-management','upgrade-score-feedback','upgrade-student-phone',
+  'upgrade-student-profile','upgrade-dynamic-osce-stations','upgrade-backend-accounts','upgrade-student-activation',
+  'upgrade-roster-account-status','upgrade-domain-scores','upgrade-student-roster-activation','upgrade-admin-roles','upgrade-workshop-sensitive-actions'];
+const files = Object.fromEntries(await Promise.all(baseline.map(async name =&gt; [name,(await readFile(`supabase/${name}.sql`,'utf8')).replace(/\r\n/g,'\n')])));
+const extract = (name,fn) =&gt; {
+  const expression = new RegExp(`create or replace function ${fn.replace(/[.*+?^${}()|[\]\\]/g,'\\$&amp;')}\\([\\s\\S]*?end;\\s*\\$\\$;`, 'i');
+  const match = files[name].match(expression);
+  if (!match) throw new Error(`Cannot find ${fn} in ${name}`);
+  return match[0];
+};
+const sqlString = value =&gt; `'${String(value).replaceAll("'","''")}'`;
+const directory = JSON.parse(await readFile('public/data/accredited-hospitals.json','utf8'));
+if (!Array.isArray(directory.hospitals) || !directory.hospitals.length) throw new Error('Missing hospital directory');
+const hospitals = [...new Map(directory.hospitals.map(h=&gt;[h.name,h])).values()].sort((a,b)=&gt;a.name.localeCompare(b.name,'zh-Hant'));
+const seed = `delete from nptc_private.hospital_directory;\ninsert into nptc_private.hospital_directory(name,city,level) values\n${hospitals.map(h=&gt;`(${[h.name,h.city,h.level].map(sqlString).join(',')})`).join(',\n')};`;
+
+let teacherRead = extract('upgrade-admin-roles','public.nptc_teacher_data')
+  .replace('public.nptc_teacher_data(requested_workshop uuid default null)','nptc_private.teacher_data(requested_workshop uuid default null,include_archived boolean default false)')
+  .replaceAll('where w.archived_at is null','where (include_archived or w.archived_at is null)')
+  .replace("jsonb_build_object('workshops',items", "jsonb_build_object('includesArchived',include_archived,'workshops',items");
+const readWrappers = `
+create or replace function public.nptc_teacher_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,false)$$;
+create or replace function public.nptc_analysis_data(requested_workshop uuid default null) returns jsonb
+language sql stable security definer set search_path='' as $$select nptc_private.teacher_data(requested_workshop,public.nptc_is_account_reviewer())$$;
+revoke all on function nptc_private.teacher_data(uuid,boolean) from public,anon,authenticated;
+revoke all on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) from public,anon;
+grant execute on function public.nptc_teacher_data(uuid),public.nptc_analysis_data(uuid) to authenticated;`;
+const onboarding = extract('upgrade-student-activation','public.nptc_student_onboarding_status').replace("'nursingYears',s.nursing_years","'serviceKind',s.service_kind,'nursingYears',s.nursing_years").replace(
+  'select * into s from nptc_private.students where email=e order by updated_at desc nulls last,id limit 1;',
+  'select student.* into s from nptc_private.students student join nptc_private.workshops w on w.id=student.workshop_id where student.email=e order by (w.archived_at is null) desc,student.updated_at desc nulls last,student.id limit 1;');
+let verifyRoster = extract('upgrade-student-roster-activation','public.nptc_verify_student_roster').replace(
+  /from nptc_private\.students s\s+where/, 'from nptc_private.students s join nptc_private.workshops w on w.id=s.workshop_id\n   where w.archived_at is null and');
+// Existing account guidance requires all roster identifiers, including historical workshops.
+verifyRoster = verifyRoster.replace(" if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then", () =&gt; ` if exists(select 1 from nptc_private.students s
+  where lower(trim(s.email))=normalized_email and trim(s.name)=trim(body-&gt;&gt;'name')
+  and s.phone=body-&gt;&gt;'phone' and coalesce(s.phone,'') ~ '^09[0-9]{8}$')
+  and exists(select 1 from auth.users u where lower(u.email)=normalized_email) then
+  return jsonb_build_object('ok',false,'code',case when exists(
+   select 1 from nptc_private.student_accounts a join auth.users u on u.id=a.user_id
+   where lower(a.email)=normalized_email and lower(u.email)=normalized_email and a.activated_at is not null
+  ) then 'already_activated' else 'account_exists' end);
+ end if;
+ if exists(select 1 from auth.users u where lower(u.email)=normalized_email) then`);
+const studentRead = extract('upgrade-domain-scores','nptc_private.student_data_before_activation').replace("'profile',jsonb_build_object('nursingYears'", "'profile',jsonb_build_object('serviceKind',s.service_kind,'nursingYears'").replace(
+  "'workshopName',w.name,'published'", "'workshopName',w.name,'archived',w.archived_at is not null,'published'");
+const current = [teacherRead,readWrappers,onboarding,
+  extract('upgrade-student-activation','public.nptc_claim_student'),
+  extract('upgrade-student-activation','public.nptc_student_data'),
+  extract('upgrade-student-activation','public.nptc_finish_student_activation').replace(' and length(trim(unit))&gt;0',''),
+  studentRead,
+  extract('upgrade-domain-scores','public.nptc_teacher_batch_scores_v3'),
+  `create or replace function public.nptc_teacher_batch_scores_v2(body jsonb) returns jsonb language sql security definer set search_path='' as $$select public.nptc_teacher_batch_scores_v3(body)$$;`,
+  verifyRoster,
+  extract('upgrade-workshop-sensitive-actions','nptc_private.require_fresh_admin_password'),
+  extract('upgrade-workshop-sensitive-actions','public.nptc_set_workshop_archived'),
+  extract('upgrade-workshop-sensitive-actions','public.nptc_delete_archived_workshop')].join('\n\n');
+let upgrade = await readFile('supabase/upgrade-project-consistency.sql','utf8');
+upgrade = upgrade.replace(/-- BEGIN HOSPITAL DIRECTORY[\s\S]*?-- END HOSPITAL DIRECTORY/,()=&gt;`-- BEGIN HOSPITAL DIRECTORY\n${seed}\n-- END HOSPITAL DIRECTORY`)
+  .replace(/-- BEGIN CURRENT READ FUNCTIONS[\s\S]*?-- END CURRENT READ FUNCTIONS/,()=&gt;`-- BEGIN CURRENT READ FUNCTIONS\n${current}\n-- END CURRENT READ FUNCTIONS`);
+await writeFile('supabase/upgrade-project-consistency.sql',upgrade);
+await writeFile('supabase/install.sql',`-- Generated by scripts/build-supabase.mjs. New database only.\n${baseline.map(name=&gt;`-- ${name}\n${files[name]}`).join('\n')}\n${upgrade}`);
+console.log(`Built SQL installation and current upgrade with ${hospitals.length} hospitals.`);
+</pre></details></html>
