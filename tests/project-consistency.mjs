@@ -89,9 +89,21 @@ await test('current installation and populated upgrade preserve permissions and 
    await assert.rejects(()=>call('nptc_teacher_save_stations_v3',{workshopId:current,stationsRevision:3,stations:updated.filter(s=>s.key!=='q1')}),/不可刪除/);
   });
   await t.test('registered roster email cannot be directly edited',async()=>{
-   await assert.rejects(()=>call('nptc_teacher_write',{action:'saveStudent',workshopId:current,id:sid,revision:0,name:'測試學員',email:'changed@example.test',phone:'0912345678'}),/信箱確認/);
+   await assert.rejects(()=>call('nptc_teacher_write',{action:'saveStudent',workshopId:current,id:sid,revision:0,name:'測試學員',email:'changed@example.test',phone:'0912345678'}),/登入 Email 不可直接/);
    await call('nptc_teacher_write',{action:'saveStudent',workshopId:current,id:sid,revision:0,name:'測試學員',email:'student@example.test',phone:'0912345678'});
    await assert.rejects(()=>call('nptc_teacher_write',{action:'deleteStudent',workshopId:current,id:sid,revision:0}),/資料已更新/);
+  });
+  await t.test('admin profile edit validates values, is atomic and stays within the selected enrollment',async()=>{
+   const body={action:'saveStudent',workshopId:current,id:sid,revision:1,name:'測試學員',email:'student@example.test',phone:'0912345678',profile};
+   for(const invalid of [{...profile,nursingYears:-1},{...profile,firstOsce:'false'},{...profile,hospital:'未知醫院'},{...profile,birthDate:'2200-01-01'},{}]) {
+    await assert.rejects(()=>call('nptc_teacher_write',{...body,name:'不應儲存',profile:invalid}));
+   }
+   let row=(await read()).students.find(s=>s.id===sid);assert.equal(row.name,'測試學員');assert.equal(row.revision,1);
+   await asUser(student,'student@example.test');await assert.rejects(()=>call('nptc_teacher_write',body),/權限/);await asUser();
+   await call('nptc_teacher_write',body);
+   row=(await read()).students.find(s=>s.id===sid);assert.equal(row.nursing_years,0);assert.equal(row.first_osce,false);assert.equal(row.hospital,hospital);assert.equal(row.birth_date,'1990-01-01');
+   await assert.rejects(()=>call('nptc_teacher_write',body),/資料已更新/);
+   await owner();assert.equal((await db.query('select hospital from nptc_private.students where id=$1',[oldSid])).rows[0].hospital,null);await asUser();
   });
   await t.test('create retry is idempotent and does not accept a changed name',async()=>{
    const body={action:'createWorkshop',requestId:'30000000-0000-0000-0000-000000000001',name:'新梯次'};

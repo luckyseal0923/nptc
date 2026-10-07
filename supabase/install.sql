@@ -1613,13 +1613,30 @@ begin
   if jsonb_typeof(body->'name') is distinct from 'string' or jsonb_typeof(body->'email') is distinct from 'string'
    or jsonb_typeof(body->'phone') is distinct from 'string' or trim(body->>'phone') !~ '^09[0-9]{8}$' then raise exception '請完整填寫姓名、Email 與有效手機。'; end if;
   if s.id is not null and s.email is distinct from lower(trim(body->>'email')) and
-   (exists(select 1 from auth.users where lower(email)=s.email) or exists(select 1 from nptc_private.student_accounts where email=s.email)) then
-   raise exception '已建立帳號的登入 Email 不可直接改名冊，請由學員專區變更並完成信箱確認。';
+   (body ? 'profile' or exists(select 1 from auth.users where lower(email)=s.email) or exists(select 1 from nptc_private.student_accounts where email=s.email)) then
+   raise exception '已建立帳號的登入 Email 不可直接改名冊，請聯絡系統管理者處理。';
   end if;
   if s.id is null then
    insert into nptc_private.students(workshop_id,name,email,phone,updated_by) values(w.id,trim(body->>'name'),lower(trim(body->>'email')),trim(body->>'phone'),auth.uid());
   else
    update nptc_private.students set name=trim(body->>'name'),email=lower(trim(body->>'email')),phone=trim(body->>'phone'),revision=revision+1,updated_at=now(),updated_by=auth.uid() where id=s.id;
+   if body ? 'profile' then
+    row_item=body->'profile';
+    if jsonb_typeof(row_item) is distinct from 'object'
+      or not row_item ?& array['nursingYears','hospital','unit','examSpecialty','firstOsce','birthDate']
+      or (row_item->'nursingYears'<>'null'::jsonb and (jsonb_typeof(row_item->'nursingYears')<>'number' or (row_item->>'nursingYears') !~ '^[0-9]+$' or (row_item->>'nursingYears')::numeric not between 0 and 60))
+      or jsonb_typeof(row_item->'hospital') is distinct from 'string'
+      or jsonb_typeof(row_item->'unit') is distinct from 'string' or length(trim(row_item->>'unit'))>100
+      or jsonb_typeof(row_item->'examSpecialty') is distinct from 'string' or row_item->>'examSpecialty' not in ('','內科','精神科','兒科','外科','婦產科','麻醉科','家庭科')
+      or jsonb_typeof(row_item->'firstOsce') not in ('boolean','null')
+      or jsonb_typeof(row_item->'birthDate') not in ('string','null')
+      then raise exception '請確認學員基本資料格式。'; end if;
+    if row_item->>'hospital'<>'' and not exists(select 1 from nptc_private.hospital_directory where name=row_item->>'hospital') then raise exception '請從官方醫院名冊選擇服務醫院。'; end if;
+    if row_item->>'birthDate' is not null and ((row_item->>'birthDate') !~ '^\d{4}-\d{2}-\d{2}$' or (row_item->>'birthDate')::date not between date '1900-01-01' and current_date) then raise exception '請確認出生年月日。'; end if;
+    update nptc_private.students set nursing_years=(row_item->>'nursingYears')::integer,
+      hospital=nullif(row_item->>'hospital',''),unit=nullif(trim(row_item->>'unit'),''),exam_specialty=nullif(row_item->>'examSpecialty',''),
+      first_osce=(row_item->>'firstOsce')::boolean,birth_date=(row_item->>'birthDate')::date where id=s.id;
+   end if;
   end if;
  end if;
  return '{"ok":true}';

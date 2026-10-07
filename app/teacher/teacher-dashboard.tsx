@@ -2,6 +2,7 @@ import { domainFormValues, domainTotal, validateDomainMax, validateDomainScores 
 import { DomainMaxFields, DomainGradeFields } from '@/components/domain-score-fields';
 import { RosterSortSelect } from '@/components/roster-sort-select';
 import { sortRoster, type RosterSort } from '@/lib/roster-sort';
+import { StudentEditDialog } from '@/components/student-edit-dialog';
 import { RosterStudentName } from '@/components/roster-student';
 import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
 import { rpc } from '@/lib/supabase';
@@ -182,15 +183,16 @@ export default function TeacherDashboard({ onWorkshopChange, canManageWorkshops 
             if (await save({ action: 'bulkImportStudents', students: rows.map(([name, email, phone]) => ({ name, email, phone })) }, `已匯入 ${rows.length} 位學員。`)) form.reset();
           }}><fieldset disabled={busy || rosterLocked}><textarea name="rows" placeholder={'姓名\tEmail\t手機電話\n王小明\tstudent@example.com\t0912345678'} /><Button className="action" type="submit">批次匯入名冊</Button></fieldset></form>
         </section>
-          <section className="data-panel"><h2>{editing ? '編輯學員' : '新增學員'}</h2><p className="form-help">Email 與手機電話會作為學員登入與聯絡資訊。</p>
-            <form key={editing?.id ?? 'new'} className="entry-form" onSubmit={async (event) => {
+          <section className="data-panel"><h2>新增學員</h2><p className="form-help">Email 與手機電話會作為學員登入與聯絡資訊。</p>
+            <form key='new' className="entry-form" onSubmit={async (event) => {
               event.preventDefault(); const form = event.currentTarget; const fields = new FormData(form);
-              if (await save({ action: 'saveStudent', id: editing?.id, revision: editing?.revision, name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone') }, '學員資料已儲存。')) form.reset();
-            }}><fieldset disabled={busy || rosterLocked}><label>姓名<Input name="name" defaultValue={editing?.name ?? ''} required maxLength={100} /></label><label>登入 Email<Input name="email" type="email" readOnly={!!editing?.account_registered} defaultValue={editing?.email ?? ''} required maxLength={254} /></label>{!!editing?.account_registered && <p className="form-help">已建立帳號的 Email 請由學員專區變更並完成信箱確認，系統會同步歷次名冊。</p>}<label>手機電話<Input name="phone" type="tel" defaultValue={editing?.phone ?? ''} required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button>{editing && <Button className="action secondary" type="button" onClick={() => setEditing(null)}>取消</Button>}</div></fieldset></form>
+              if (await save({ action: 'saveStudent', name: fields.get('name'), email: fields.get('email'), phone: fields.get('phone') }, '學員資料已儲存。')) form.reset();
+            }}><fieldset disabled={busy || rosterLocked}><label>姓名<Input name="name" required maxLength={100} /></label><label>登入 Email<Input name="email" type="email" required maxLength={254} /></label><label>手機電話<Input name="phone" type="tel" required inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" /></label><div className="form-actions"><Button className="action" type="submit">{busy ? '儲存中…' : '儲存學員資料'}</Button></div></fieldset></form>
           </section>
         </div>
+        {editing && <StudentEditDialog key={editing.id} student={editing} busy={busy} error={error} onClose={() => setEditing(null)} onSave={body => save(body, '學員資料已儲存。')} />}
         <section className="data-panel roster-current"><div className="panel-heading"><div><span className="section-label">CURRENT ROSTER</span><h2>目前學員名冊</h2></div><div className="flex items-center gap-3"><span>{data.students.length} 位學員</span><Button className="action small secondary" disabled={busy} onClick={() => changeWorkshop(data.selected!.id)}>重新整理</Button></div></div>
-          {data.students.length ? <Table><TableHeader><TableRow><TableHead aria-sort={rosterSort === 'stroke-asc' ? 'ascending' : rosterSort === 'stroke-desc' ? 'descending' : 'none'}><RosterSortSelect value={rosterSort} onChange={setRosterSort} /></TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{sortedRoster.map((student) => <TableRow key={student.id}><TableCell><RosterStudentName student={student} /></TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || rosterLocked} onClick={() => setEditing(student)}>編輯</Button><Button className="action small destructive" disabled={busy || rosterLocked} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
+          {data.students.length ? <Table><TableHeader><TableRow><TableHead aria-sort={rosterSort === 'stroke-asc' ? 'ascending' : rosterSort === 'stroke-desc' ? 'descending' : 'none'}><RosterSortSelect value={rosterSort} onChange={setRosterSort} /></TableHead><TableHead>登入資訊</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{sortedRoster.map((student) => <TableRow key={student.id}><TableCell><RosterStudentName student={student} /></TableCell><TableCell>{student.email}<small className="cell-email">手機 {maskPhone(student.phone)}</small></TableCell><TableCell><div className="table-actions"><Button className="action small secondary" disabled={busy || rosterLocked} onClick={() => { setError(''); setEditing(student); }}>編輯</Button><Button className="action small destructive" disabled={busy || rosterLocked} onClick={() => deleteStudent(student)}>刪除</Button></div></TableCell></TableRow>)}</TableBody></Table> : <p className="empty-inline">尚無學員，請先使用上方任一方式新增。</p>}
         </section>
       </TabsContent>
 
