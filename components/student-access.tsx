@@ -83,7 +83,7 @@ export function StudentActivation({ email, status, onComplete }: { email: string
   const [hospitals, setHospitals] = useState<Hospital[]>([]), [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
-    rpc<{hospitals:Hospital[]}>('nptc_hospital_directory',{},controller.signal).then(data=>setHospitals(data.hospitals)).catch(e=>{if(e.name!=='AbortError')setError('醫院名冊暫時無法載入，可選擇清單中找不到並自行填寫。');}).finally(()=>setLoading(false));
+    rpc<{hospitals:Hospital[]}>('nptc_hospital_directory',{},controller.signal).then(data=>setHospitals(data.hospitals)).catch(e=>{if(e.name!=='AbortError')setError('醫院名冊暫時無法載入，可勾選「服務機構不在清單內」並自行填寫。');}).finally(()=>setLoading(false));
     return () => controller.abort();
   }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {

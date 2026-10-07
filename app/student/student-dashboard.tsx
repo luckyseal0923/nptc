@@ -55,7 +55,7 @@ export default function StudentDashboard() {
     const abort = new AbortController();
     rpc<{hospitals:Hospital[]}>('nptc_hospital_directory',{},abort.signal)
       .then(data=>setHospitals(data.hospitals))
-      .catch(cause=>{if(cause.name!=='AbortError')setHospitalError('醫院名冊暫時無法載入，可選擇清單中找不到並自行填寫。');})
+      .catch(cause=>{if(cause.name!=='AbortError')setHospitalError('醫院名冊暫時無法載入，可勾選「服務機構不在清單內」並自行填寫。');})
       .finally(()=>setHospitalLoading(false));
     return () => abort.abort();
   }, []);

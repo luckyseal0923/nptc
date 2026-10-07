@@ -5,3 +5,5 @@
 .student-edit-dialog{position:fixed;inset:0;margin:auto;width:min(850px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow-y:auto;border:1px solid #cbdacf;border-radius:16px;background:#fff;color:#173b37;padding:28px;box-shadow:0 20px 60px #0003}.student-edit-dialog::backdrop{background:#102c2866}.student-edit-dialog .profile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:640px){.student-edit-dialog{padding:20px}.student-edit-dialog .profile-grid{grid-template-columns:1fr}}
 
 .service-institution{display:grid;gap:14px;grid-column:1/-1}.service-institution .employment-check{display:flex;align-items:center;gap:10px}.service-institution .employment-check input{width:18px;height:18px;padding:0;accent-color:#173f39}
+
+.institution-other-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.institution-other-row>.employment-check{flex:none}.institution-other-row>input{flex:1;min-width:180px}.service-institution input:disabled{background:#f1f4f1;color:#77847f}
