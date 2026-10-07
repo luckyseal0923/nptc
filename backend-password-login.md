@@ -10,11 +10,16 @@
 
 ## 正式環境設定
 
-在 Zeabur auth 的 GOTRUE_URI_ALLOW_LIST 保留原值並加入：
+正式網站使用 https://nptc-wfh.zeabur.app。在 Zeabur auth 設定以下公開變數；SMTP、密碼、JWT 與其他伺服器變數沿用原值：
 
-https://nptc-ai.zeabur.app/teacher/?reset=1
+```dotenv
+GOTRUE_SITE_URL=https://nptc-wfh.zeabur.app
+GOTRUE_URI_ALLOW_LIST=https://nptc-wfh.zeabur.app/teacher/,https://nptc-wfh.zeabur.app/student/,https://nptc-wfh.zeabur.app/teacher/?reset=1,https://nptc-wfh.zeabur.app/student/?reset=1
+GOTRUE_MAILER_AUTOCONFIRM=false
+GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED=true
+```
 
-同時保留 https://nptc-ai.zeabur.app/teacher/ 。修改後重新啟動 auth。
+回跳清單只列老師與學員的信箱確認及密碼重設路徑。儲存後確認 auth 重新部署成功，後續請從正式網址登入與重設密碼。
 不要為了省略後臺首次驗證而全域開啟自動確認。學員首次啟用由 student-activate 核對名冊後建立帳號；後臺申請仍須實際確認信箱，Email 變更也需完成確認。
 
 ## 驗收
@@ -26,4 +31,4 @@ https://nptc-ai.zeabur.app/teacher/?reset=1
 
 本機已完成型別檢查、正式建置、帳號審核及學員隔離 SQL 測試與表單版面確認。正式收信、密碼設定及部署後完整流程尚需實際驗收。
 
-官方 API：https://supabase.com/docs/reference/javascript/auth-signup
+官方說明：[申請帳號](https://supabase.com/docs/reference/javascript/auth-signup)、[回跳網址](https://supabase.com/docs/guides/auth/redirect-urls)。

@@ -2,6 +2,8 @@
 
 前端是 React＋Vite 靜態網站，建置結果在 dist/。資料庫讀寫透過 Supabase RPC，學員首次啟用由 Edge Function 處理。本文以資料庫版本 2026100701 為準。
 
+正式網站：[nptc-wfh.zeabur.app](https://nptc-wfh.zeabur.app/)。老師使用 [/teacher/](https://nptc-wfh.zeabur.app/teacher/)，學員使用 [/student/](https://nptc-wfh.zeabur.app/student/)。正式 Auth 回跳設定以 backend-password-login.md 的四個路徑為準。
+
 ## 登入與帳號
 
 - 後臺：Email＋密碼登入。新申請者須確認信箱並經系統管理者啟用，未啟用與停用帳號不能讀寫課程。
@@ -71,7 +73,7 @@ select count(*) as grades from nptc_private.station_grades;
 
 1. 完成上述 SQL 升級。
 2. 部署 supabase/functions/student-activate/index.ts，伺服器設定 SUPABASE_URL 與 SUPABASE_SERVICE_ROLE_KEY。若自架 Kong API key 與資料庫 JWT 分開設定，JWT_SECRET 必須與 Auth／PostgREST 的共享設定一致；機密僅放伺服器。CLI 使用 supabase/config.toml 的 functions.student-activate.verify_jwt=false，因為首次啟用者尚未登入；僅此函式允許匿名進入，內部仍以 service-only RPC 核對名冊、拒絕既有帳號並限制嘗試次數。自架環境須另外確認 functions gateway／runtime 有套用相同設定，單純放入 config.toml 不會自動更新 Zeabur。
-3. 確認 Auth 的 Site URL、Redirect URLs、SMTP 與 Email 變更確認設定。使用實際部署網址的 /teacher/、/student/ 及各自 ?reset=1；GitHub Pages 部署要包含 /nptc/ 前綴。Email 變更應保留 secure email change，依設定確認新舊信箱。不要以全域自動確認略過後臺申請或 Email 變更。
+3. 確認 Auth 的 Site URL 為 https://nptc-wfh.zeabur.app，Redirect URLs 使用 backend-password-login.md 的四個正式路徑。確認 SMTP 與 Email 變更確認設定；Email 變更保留 secure email change，確認新舊信箱。不要以全域自動確認略過後臺申請或 Email 變更。
 4. 部署新版 dist/。先升級 SQL，再部署前端；舊頁籤的題目寫入若未帶版本會被拒絕，請重新整理頁面。
 5. 使用測試名冊驗收首次啟用、登出／密碼登入、重設密碼、部分公布、名冊鎖定、封存／還原、系統管理者分析封存紀錄及 Email 變更。永久刪除只用可拋棄測試梯次，由真人重新輸入系統管理者 Email、密碼與梯次名稱驗收。
 
