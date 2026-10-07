@@ -3,6 +3,7 @@ import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+import { studentActivationError } from '@/lib/student-access-errors';
 
 type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
 export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
@@ -18,8 +19,10 @@ function passwordFrom(form: FormData) {
 }
 
 export function StudentLogin() {
-  const [mode, setMode] = useState<'activate' | 'login' | 'reset'>('login');
+  const [mode, setMode] = useState<'activate' | 'login' | 'reset' | 'confirm'>('login');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [sent, setSent] = useState('');
+  function changeMode(next: typeof mode) { setMode(next); setError(''); setSent(''); }
+  const heading = mode === 'activate' ? '第一次使用本平台？建立帳號' : mode === 'reset' ? '忘記密碼' : mode === 'confirm' ? '重新寄送確認信' : '學員登入';
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); const fields = new FormData(event.currentTarget);
     setBusy(true); setError(''); setSent('');
@@ -27,7 +30,7 @@ export function StudentLogin() {
       const email = String(fields.get('email')).trim();
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email, password: String(fields.get('password')) });
-        if (error) throw new Error('登入失敗，請確認 Email 與密碼；尚未啟用者請選「首次啟用帳號」。');
+        if (error) throw new Error('登入未完成，請確認 Email 與密碼。忘記密碼可申請重設；尚未確認信箱者可重新寄送確認信。');
       } else if (mode === 'activate') {
         sessionStorage.setItem('nptc-activation-name', String(fields.get('name')).trim());
         sessionStorage.setItem('nptc-activation-phone', String(fields.get('phone')).trim());
@@ -36,29 +39,35 @@ export function StudentLogin() {
           email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
           password,
         } });
-        if (error) throw new Error('啟用未完成，請確認姓名、Email 與手機；若已建立帳號，請改用學員登入。');
+        if (error) throw new Error(studentActivationError(error));
         sessionStorage.setItem('nptc-password-created', email.toLowerCase());
         const login = await supabase.auth.signInWithPassword({ email, password });
         if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
-      } else {
+      } else if (mode === 'reset') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
-        if (error) throw error;
+        if (error) throw new Error('重設密碼信件暫時無法寄送，請稍後重試或聯絡管理員。');
         setSent('若此 Email 可用於重設密碼，您將收到重設連結，請至信箱查看。');
+      } else {
+        const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirect() } });
+        if (error) throw new Error('確認信暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 有待確認的註冊申請，您將收到確認信。請完成信箱確認後登入，再接續核對名冊與補齊個人資料。');
       }
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }
   return <section className="mx-auto max-w-4xl px-6 py-12">
-    <h1 className="text-3xl font-bold">學員專區</h1><p className="mt-3 mb-8">首次使用請先啟用帳號；已完成啟用者直接登入查看成績。</p>
-    <div className="grid gap-4 sm:grid-cols-2">{(['activate', 'login'] as const).map(value => <button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() => { setMode(value); setError(''); setSent(''); }} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}><strong className="block text-xl">{value === 'activate' ? '首次啟用帳號' : '學員登入'}</strong><span className="mt-2 block text-sm">{value === 'activate' ? '核對姓名、Email、手機，建立登入密碼' : '使用已設定的 Email 與密碼登入'}</span></button>)}</div>
+    <h1 className="text-3xl font-bold">學員專區</h1><p className="mt-3 mb-8">帳號只需建立一次。曾參加其他梯次並完成啟用者，請以原本的 Email 與密碼直接登入。</p>
+    <div className="grid gap-4 sm:grid-cols-2">{(['login', 'activate'] as const).map(value => <button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() => changeMode(value)} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}><strong className="block text-xl">{value === 'activate' ? '第一次使用本平台？建立帳號' : '學員登入'}</strong><span className="mt-2 block text-sm">{value === 'activate' ? '核對名冊並建立帳號，完成後即可跨梯次使用' : '已有帳號或參加新梯次，請從這裡登入'}</span></button>)}</div>
     <form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8">
-      <h2 className="text-xl font-bold">{mode === 'activate' ? '首次啟用帳號' : mode === 'reset' ? '忘記密碼' : '學員登入'}</h2>
-      {mode === 'activate' && <><p className="text-sm">填寫後台名冊登錄的姓名、Email 與手機，並設定登入密碼。資料核對成功後即可建立帳號，不需要驗證信。</p><label className="block">姓名<Input className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /></label></>}
+      <h2 className="text-xl font-bold">{heading}</h2>
+      {mode === 'activate' && <><p className="text-sm">填寫老師名冊登錄的姓名、Email 與完整手機號碼，並設定登入密碼。新帳號核對成功後即可建立，不需要驗證信。曾建立帳號者請直接登入；若尚未完成啟用，登入後可接續填寫資料。</p><label className="block">姓名<Input id="student-activation-name" className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /></label></>}
+      {mode === 'confirm' && <p className="text-sm">若曾註冊但尚未確認信箱，可重新寄送確認信。完成確認後，請使用原本的密碼登入。</p>}
       <label className="block">Email<Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /></label>
       {mode === 'activate' && <label className="block">手機電話<Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /></label>}
       {mode === 'activate' && <PasswordFields />}
       {mode === 'login' && <label className="block">密碼<Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /></label>}
       {error && <p role="alert" className="text-red-700">{error}</p>}{sent && <p role="status" className="rounded bg-green-50 p-3">{sent}</p>}
-      <div className="flex flex-wrap items-center gap-5"><Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}>{mode === 'reset' ? '返回登入' : '忘記密碼？'}</button></div>
+      {mode === 'activate' && error && <div className="flex flex-wrap gap-5 text-sm">{error.includes('核對名冊') && <a className="underline" href="#student-activation-name">重新核對資料</a>}<button type="button" disabled={busy} className="underline" onClick={() => changeMode('login')}>改用學員登入</button></div>}
+      <div className="flex flex-wrap items-center gap-5"><Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}>{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : mode === 'confirm' ? '寄送確認信' : '登入'}</Button><button type="button" disabled={busy} className="text-sm underline" onClick={() => changeMode(mode === 'reset' || mode === 'confirm' ? 'login' : 'reset')}>{mode === 'reset' || mode === 'confirm' ? '返回登入' : '忘記密碼？'}</button>{mode === 'login' && <button type="button" disabled={busy} className="text-sm underline" onClick={() => changeMode('confirm')}>重新寄送確認信</button>}</div>
     </form>
   </section>;
 }
@@ -110,7 +119,7 @@ export function ResetStudentPassword({ onComplete, teacher = false }: { onComple
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   return <form className="mx-auto my-12 max-w-lg space-y-5 rounded-xl border bg-white p-6" onSubmit={async event => {
     event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
-    try { const { error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
+    try { const { data, error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; if (!teacher && data.user?.email) sessionStorage.setItem('nptc-password-created', data.user.email.toLowerCase()); history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
     catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }}><h1 className="text-2xl font-bold">重設登入密碼</h1><PasswordFields />{error && <p role="alert" className="text-red-700">{error}</p>}<Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}>{busy ? '儲存中…' : '儲存新密碼'}</Button></form>;
 }

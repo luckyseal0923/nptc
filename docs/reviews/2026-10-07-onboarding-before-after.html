@@ -1,0 +1,352 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>學員帳號修改前後</title><style>body{max-width:1100px;margin:40px auto;padding:20px;font:16px/1.7 sans-serif;color:#153c36}pre{white-space:pre-wrap;background:#f1f5f3;padding:20px;font:13px/1.6 monospace}summary{cursor:pointer;padding:12px;background:#eaf2df;margin:8px 0}</style><h1>學員登入與帳號狀態：完整修改前後對照</h1><p>2026-10-07。每個區塊提供完整檔案，可直接複製。新增檔案的修改前為不存在。</p><h2>components/roster-student.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { Check, X } from 'lucide-react';
+import { Tooltip } from '@base-ui/react/tooltip';
+
+type RosterRecord = { name: string; [key: string]: unknown };
+
+export function RosterStudentName({ student }: { student: RosterRecord }) {
+  const active = Boolean(student.account_activated_at);
+  const status = active ? '已完成啟用' : '待完成啟用';
+  const Icon = active ? Check : X;
+  const display = (value: unknown) =&gt; value === null || value === undefined || value === '' ? '尚未填寫' : String(value);
+  const fields = [
+    ['Email', student.email],
+    ['手機電話', student.phone],
+    ['護理年資', student.nursing_years == null ? null : `${student.nursing_years} 年`],
+    ['服務醫院', student.hospital],
+    ['服務單位', student.unit],
+    ['報考科別', student.exam_specialty],
+    ['首次報考國家 OSCE', student.first_osce === true ? '是' : student.first_osce === false ? '否' : null],
+    ['出生年月日', student.birth_date],
+  ];
+  return &lt;Tooltip.Root&gt;
+    &lt;Tooltip.Trigger delay={150} closeDelay={120} closeOnClick={false} className="inline-flex cursor-help items-center gap-2 rounded text-left outline-offset-4 focus-visible:outline-2 focus-visible:outline-[#174943]"&gt;
+      {student.name}
+      &lt;span role="img" aria-label={status} title={status}&gt;
+        &lt;Icon className={`h-5 w-5 ${active ? 'text-emerald-700' : 'text-red-600'}`} strokeWidth={2.5} aria-hidden="true" /&gt;
+      &lt;/span&gt;
+    &lt;/Tooltip.Trigger&gt;
+    &lt;Tooltip.Portal&gt;
+      &lt;Tooltip.Positioner side="right" align="start" sideOffset={12} collisionPadding={12} className="z-50"&gt;
+        &lt;Tooltip.Popup className="w-80 max-w-[calc(100vw-24px)] rounded-xl border border-[#cbdacf] bg-white p-5 text-sm text-[#133b38] shadow-xl"&gt;
+          &lt;div className="mb-3 border-b border-[#dbe4dc] pb-3"&gt;&lt;strong className="text-base"&gt;{student.name}&lt;/strong&gt;&lt;span className={`ml-3 text-xs ${active ? 'text-emerald-700' : 'text-red-600'}`}&gt;{status}&lt;/span&gt;&lt;/div&gt;
+          &lt;dl className="space-y-2"&gt;{fields.map(([label, value]) =&gt; &lt;div className="grid grid-cols-[7rem_1fr] gap-2" key={String(label)}&gt;
+            &lt;dt className="text-xs text-slate-500"&gt;{String(label)}&lt;/dt&gt;&lt;dd className="min-w-0 break-words"&gt;{display(value)}&lt;/dd&gt;
+          &lt;/div&gt;)}&lt;/dl&gt;
+        &lt;/Tooltip.Popup&gt;
+      &lt;/Tooltip.Positioner&gt;
+    &lt;/Tooltip.Portal&gt;
+  &lt;/Tooltip.Root&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { Check, Clock3, X } from 'lucide-react';
+import { Tooltip } from '@base-ui/react/tooltip';
+
+type RosterRecord = { name: string; [key: string]: unknown };
+
+export function RosterStudentName({ student }: { student: RosterRecord }) {
+  const active = Boolean(student.account_activated_at);
+  const registered = active || student.account_registered === true;
+  const status = active ? '已啟用' : registered ? '帳號已建立，啟用未完成' : '尚未建立帳號';
+  const Icon = active ? Check : registered ? Clock3 : X;
+  const color = active ? 'text-emerald-700' : registered ? 'text-amber-700' : 'text-red-600';
+  const display = (value: unknown) =&gt; value === null || value === undefined || value === '' ? '尚未填寫' : String(value);
+  const fields = [
+    ['Email', student.email],
+    ['手機電話', student.phone],
+    ['護理年資', student.nursing_years == null ? null : `${student.nursing_years} 年`],
+    ['服務醫院', student.hospital],
+    ['服務單位', student.unit],
+    ['報考科別', student.exam_specialty],
+    ['首次報考國家 OSCE', student.first_osce === true ? '是' : student.first_osce === false ? '否' : null],
+    ['出生年月日', student.birth_date],
+  ];
+  return &lt;Tooltip.Root&gt;
+    &lt;Tooltip.Trigger delay={150} closeDelay={120} closeOnClick={false} className="inline-flex cursor-help items-center gap-2 rounded text-left outline-offset-4 focus-visible:outline-2 focus-visible:outline-[#174943]"&gt;
+      {student.name}
+      &lt;span role="img" aria-label={status} title={status}&gt;
+        &lt;Icon className={`h-5 w-5 ${color}`} strokeWidth={2.5} aria-hidden="true" /&gt;
+      &lt;/span&gt;
+    &lt;/Tooltip.Trigger&gt;
+    &lt;Tooltip.Portal&gt;
+      &lt;Tooltip.Positioner side="right" align="start" sideOffset={12} collisionPadding={12} className="z-50"&gt;
+        &lt;Tooltip.Popup className="w-80 max-w-[calc(100vw-24px)] rounded-xl border border-[#cbdacf] bg-white p-5 text-sm text-[#133b38] shadow-xl"&gt;
+          &lt;div className="mb-3 border-b border-[#dbe4dc] pb-3"&gt;&lt;strong className="text-base"&gt;{student.name}&lt;/strong&gt;&lt;span className={`ml-3 text-xs ${color}`}&gt;{status}&lt;/span&gt;&lt;/div&gt;
+          &lt;dl className="space-y-2"&gt;{fields.map(([label, value]) =&gt; &lt;div className="grid grid-cols-[7rem_1fr] gap-2" key={String(label)}&gt;
+            &lt;dt className="text-xs text-slate-500"&gt;{String(label)}&lt;/dt&gt;&lt;dd className="min-w-0 break-words"&gt;{display(value)}&lt;/dd&gt;
+          &lt;/div&gt;)}&lt;/dl&gt;
+        &lt;/Tooltip.Popup&gt;
+      &lt;/Tooltip.Positioner&gt;
+    &lt;/Tooltip.Portal&gt;
+  &lt;/Tooltip.Root&gt;;
+}
+</pre></details><h2>components/student-access.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useEffect, useState } from 'react';
+import { rpc, supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+
+type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
+export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
+const redirect = () =&gt; new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
+const message = (cause: unknown) =&gt; cause instanceof Error ? cause.message : '操作未完成，請稍後重試。';
+function PasswordFields() {
+  return &lt;&gt;&lt;label className="block"&gt;設定密碼（至少 8 個字元）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;再次輸入密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;/&gt;;
+}
+function passwordFrom(form: FormData) {
+  const password = String(form.get('password') ?? '');
+  if (password.length &lt; 8 || password !== form.get('confirm')) throw new Error('密碼須至少 8 個字元，且兩次輸入須相同。');
+  return password;
+}
+
+export function StudentLogin() {
+  const [mode, setMode] = useState&lt;'activate' | 'login' | 'reset'&gt;('login');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [sent, setSent] = useState('');
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget);
+    setBusy(true); setError(''); setSent('');
+    try {
+      const email = String(fields.get('email')).trim();
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: String(fields.get('password')) });
+        if (error) throw new Error('登入失敗，請確認 Email 與密碼；尚未啟用者請選「首次啟用帳號」。');
+      } else if (mode === 'activate') {
+        sessionStorage.setItem('nptc-activation-name', String(fields.get('name')).trim());
+        sessionStorage.setItem('nptc-activation-phone', String(fields.get('phone')).trim());
+        const password = passwordFrom(fields);
+        const { error } = await supabase.functions.invoke('student-activate', { body: {
+          email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
+          password,
+        } });
+        if (error) throw new Error('啟用未完成，請確認姓名、Email 與手機；若已建立帳號，請改用學員登入。');
+        sessionStorage.setItem('nptc-password-created', email.toLowerCase());
+        const login = await supabase.auth.signInWithPassword({ email, password });
+        if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
+        if (error) throw error;
+        setSent('若此 Email 可用於重設密碼，您將收到重設連結，請至信箱查看。');
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  return &lt;section className="mx-auto max-w-4xl px-6 py-12"&gt;
+    &lt;h1 className="text-3xl font-bold"&gt;學員專區&lt;/h1&gt;&lt;p className="mt-3 mb-8"&gt;首次使用請先啟用帳號；已完成啟用者直接登入查看成績。&lt;/p&gt;
+    &lt;div className="grid gap-4 sm:grid-cols-2"&gt;{(['activate', 'login'] as const).map(value =&gt; &lt;button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() =&gt; { setMode(value); setError(''); setSent(''); }} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}&gt;&lt;strong className="block text-xl"&gt;{value === 'activate' ? '首次啟用帳號' : '學員登入'}&lt;/strong&gt;&lt;span className="mt-2 block text-sm"&gt;{value === 'activate' ? '核對姓名、Email、手機，建立登入密碼' : '使用已設定的 Email 與密碼登入'}&lt;/span&gt;&lt;/button&gt;)}&lt;/div&gt;
+    &lt;form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8"&gt;
+      &lt;h2 className="text-xl font-bold"&gt;{mode === 'activate' ? '首次啟用帳號' : mode === 'reset' ? '忘記密碼' : '學員登入'}&lt;/h2&gt;
+      {mode === 'activate' &amp;&amp; &lt;&gt;&lt;p className="text-sm"&gt;填寫後台名冊登錄的姓名、Email 與手機，並設定登入密碼。資料核對成功後即可建立帳號，不需要驗證信。&lt;/p&gt;&lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /&gt;&lt;/label&gt;&lt;/&gt;}
+      &lt;label className="block"&gt;Email&lt;Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /&gt;&lt;/label&gt;
+      {mode === 'activate' &amp;&amp; &lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /&gt;&lt;/label&gt;}
+      {mode === 'activate' &amp;&amp; &lt;PasswordFields /&gt;}
+      {mode === 'login' &amp;&amp; &lt;label className="block"&gt;密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /&gt;&lt;/label&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}{sent &amp;&amp; &lt;p role="status" className="rounded bg-green-50 p-3"&gt;{sent}&lt;/p&gt;}
+      &lt;div className="flex flex-wrap items-center gap-5"&gt;&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : '登入'}&lt;/Button&gt;&lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; { setMode(mode === 'reset' ? 'login' : 'reset'); setError(''); setSent(''); }}&gt;{mode === 'reset' ? '返回登入' : '忘記密碼？'}&lt;/button&gt;&lt;/div&gt;
+    &lt;/form&gt;
+  &lt;/section&gt;;
+}
+
+export function StudentActivation({ email, status, onComplete }: { email: string; status: Onboarding; onComplete: () =&gt; void }) {
+  const passwordCreated = sessionStorage.getItem('nptc-password-created') === email.toLowerCase();
+  const [state, setState] = useState(status), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]), [loading, setLoading] = useState(true);
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},controller.signal).then(data=&gt;setHospitals(data.hospitals)).catch(e=&gt;{if(e.name!=='AbortError')setError('醫院名冊無法載入，請重新整理後再試。');}).finally(()=&gt;setLoading(false));
+    return () =&gt; controller.abort();
+  }, []);
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try {
+      if (state.stage === 'unclaimed') {
+        const result = await rpc&lt;Onboarding&gt;('nptc_claim_student', { body: { name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim() } });
+        sessionStorage.removeItem('nptc-activation-name'); sessionStorage.removeItem('nptc-activation-phone');
+        if (result.stage === 'active') onComplete(); else setState(result);
+      } else {
+        const password = passwordCreated ? null : passwordFrom(fields), hospital = String(fields.get('hospital') ?? '');
+        if (!hospitals.some(h =&gt; h.name === hospital)) throw new Error('請搜尋並點選服務醫院全名。');
+        await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit')).trim(), examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
+        if (password !== null) { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; }
+        await rpc('nptc_finish_student_activation'); sessionStorage.removeItem('nptc-password-created'); onComplete();
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  const student = state.student;
+  return &lt;section className="mx-auto max-w-3xl px-6 py-12"&gt;&lt;h1 className="text-2xl font-bold"&gt;完成首次啟用&lt;/h1&gt;&lt;p className="my-4"&gt;{state.stage === 'unclaimed' ? '已登入，請核對報名姓名與手機。' : '名冊已核對，請補齊個人資料並設定日後登入密碼。'}&lt;/p&gt;
+    &lt;form onSubmit={submit} className="space-y-5 rounded-xl border bg-white p-6" key={state.stage}&gt;
+      &lt;label className="block"&gt;Email（登入帳號）&lt;Input className="mt-2 h-12 px-3 md:text-base" value={email} readOnly /&gt;&lt;/label&gt;
+      {state.stage === 'unclaimed' ? &lt;&gt;&lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" defaultValue={sessionStorage.getItem('nptc-activation-name') ?? ''} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" pattern="09[0-9]{8}" defaultValue={sessionStorage.getItem('nptc-activation-phone') ?? ''} required /&gt;&lt;/label&gt;&lt;/&gt; : &lt;&gt;
+        &lt;div className="grid gap-4 sm:grid-cols-2"&gt;&lt;label&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.name ?? ''} readOnly /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.phone ?? ''} readOnly /&gt;&lt;/label&gt;&lt;/div&gt;&lt;p className="text-sm"&gt;以上資料由管理員建立，如需更正請聯絡管理員。&lt;/p&gt;
+        &lt;label className="block"&gt;護理年資（年）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={student?.nursingYears ?? ''} required /&gt;&lt;/label&gt;
+        &lt;HospitalPicker defaultValue={student?.hospital ?? ''} hospitals={hospitals} loading={loading} /&gt;
+        &lt;label className="block"&gt;服務單位&lt;Input className="mt-2 h-12 px-3 md:text-base" name="unit" maxLength={100} defaultValue={student?.unit ?? ''} required /&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;報考科別&lt;select name="examSpecialty" defaultValue={student?.examSpecialty ?? ''} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(s =&gt; &lt;option key={s}&gt;{s}&lt;/option&gt;)}&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;是否首次報考國家 OSCE&lt;select name="firstOsce" defaultValue={student?.firstOsce == null ? '' : student.firstOsce ? 'yes' : 'no'} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;&lt;option value="yes"&gt;是&lt;/option&gt;&lt;option value="no"&gt;否&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;出生年月日&lt;Input className="mt-2 h-12 px-3 md:text-base" name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /&gt;&lt;/label&gt;
+        {!passwordCreated &amp;&amp; &lt;PasswordFields /&gt;}
+      &lt;/&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy || (state.stage === 'profile' &amp;&amp; loading)}&gt;{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}&lt;/Button&gt;
+    &lt;/form&gt;&lt;/section&gt;;
+}
+
+export function ResetStudentPassword({ onComplete, teacher = false }: { onComplete: () =&gt; void; teacher?: boolean }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  return &lt;form className="mx-auto my-12 max-w-lg space-y-5 rounded-xl border bg-white p-6" onSubmit={async event =&gt; {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try { const { error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
+    catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }}&gt;&lt;h1 className="text-2xl font-bold"&gt;重設登入密碼&lt;/h1&gt;&lt;PasswordFields /&gt;{error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '儲存中…' : '儲存新密碼'}&lt;/Button&gt;&lt;/form&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { useEffect, useState } from 'react';
+import { rpc, supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { HospitalPicker, type Hospital } from '@/components/hospital-picker';
+import { studentActivationError } from '@/lib/student-access-errors';
+
+type Student = { name: string; email: string; phone: string; nursingYears: number | null; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
+export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
+const redirect = () =&gt; new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
+const message = (cause: unknown) =&gt; cause instanceof Error ? cause.message : '操作未完成，請稍後重試。';
+function PasswordFields() {
+  return &lt;&gt;&lt;label className="block"&gt;設定密碼（至少 8 個字元）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;再次輸入密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" autoComplete="new-password" minLength={8} required /&gt;&lt;/label&gt;&lt;/&gt;;
+}
+function passwordFrom(form: FormData) {
+  const password = String(form.get('password') ?? '');
+  if (password.length &lt; 8 || password !== form.get('confirm')) throw new Error('密碼須至少 8 個字元，且兩次輸入須相同。');
+  return password;
+}
+
+export function StudentLogin() {
+  const [mode, setMode] = useState&lt;'activate' | 'login' | 'reset' | 'confirm'&gt;('login');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [sent, setSent] = useState('');
+  function changeMode(next: typeof mode) { setMode(next); setError(''); setSent(''); }
+  const heading = mode === 'activate' ? '第一次使用本平台？建立帳號' : mode === 'reset' ? '忘記密碼' : mode === 'confirm' ? '重新寄送確認信' : '學員登入';
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget);
+    setBusy(true); setError(''); setSent('');
+    try {
+      const email = String(fields.get('email')).trim();
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: String(fields.get('password')) });
+        if (error) throw new Error('登入未完成，請確認 Email 與密碼。忘記密碼可申請重設；尚未確認信箱者可重新寄送確認信。');
+      } else if (mode === 'activate') {
+        sessionStorage.setItem('nptc-activation-name', String(fields.get('name')).trim());
+        sessionStorage.setItem('nptc-activation-phone', String(fields.get('phone')).trim());
+        const password = passwordFrom(fields);
+        const { error } = await supabase.functions.invoke('student-activate', { body: {
+          email, name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim(),
+          password,
+        } });
+        if (error) throw new Error(studentActivationError(error));
+        sessionStorage.setItem('nptc-password-created', email.toLowerCase());
+        const login = await supabase.auth.signInWithPassword({ email, password });
+        if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
+      } else if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
+        if (error) throw new Error('重設密碼信件暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 可用於重設密碼，您將收到重設連結，請至信箱查看。');
+      } else {
+        const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirect() } });
+        if (error) throw new Error('確認信暫時無法寄送，請稍後重試或聯絡管理員。');
+        setSent('若此 Email 有待確認的註冊申請，您將收到確認信。請完成信箱確認後登入，再接續核對名冊與補齊個人資料。');
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  return &lt;section className="mx-auto max-w-4xl px-6 py-12"&gt;
+    &lt;h1 className="text-3xl font-bold"&gt;學員專區&lt;/h1&gt;&lt;p className="mt-3 mb-8"&gt;帳號只需建立一次。曾參加其他梯次並完成啟用者，請以原本的 Email 與密碼直接登入。&lt;/p&gt;
+    &lt;div className="grid gap-4 sm:grid-cols-2"&gt;{(['login', 'activate'] as const).map(value =&gt; &lt;button key={value} type="button" disabled={busy} aria-pressed={mode === value} onClick={() =&gt; changeMode(value)} className={`rounded-xl border-2 p-6 text-left ${mode === value ? 'border-[#174943] bg-[#eaf2df]' : 'border-[#d5e0d8] bg-white'}`}&gt;&lt;strong className="block text-xl"&gt;{value === 'activate' ? '第一次使用本平台？建立帳號' : '學員登入'}&lt;/strong&gt;&lt;span className="mt-2 block text-sm"&gt;{value === 'activate' ? '核對名冊並建立帳號，完成後即可跨梯次使用' : '已有帳號或參加新梯次，請從這裡登入'}&lt;/span&gt;&lt;/button&gt;)}&lt;/div&gt;
+    &lt;form onSubmit={submit} className="mt-6 space-y-5 rounded-xl border bg-white p-6 sm:p-8"&gt;
+      &lt;h2 className="text-xl font-bold"&gt;{heading}&lt;/h2&gt;
+      {mode === 'activate' &amp;&amp; &lt;&gt;&lt;p className="text-sm"&gt;填寫老師名冊登錄的姓名、Email 與完整手機號碼，並設定登入密碼。新帳號核對成功後即可建立，不需要驗證信。曾建立帳號者請直接登入；若尚未完成啟用，登入後可接續填寫資料。&lt;/p&gt;&lt;label className="block"&gt;姓名&lt;Input id="student-activation-name" className="mt-2 h-12 px-3 md:text-base" name="name" autoComplete="name" maxLength={100} required /&gt;&lt;/label&gt;&lt;/&gt;}
+      {mode === 'confirm' &amp;&amp; &lt;p className="text-sm"&gt;若曾註冊但尚未確認信箱，可重新寄送確認信。完成確認後，請使用原本的密碼登入。&lt;/p&gt;}
+      &lt;label className="block"&gt;Email&lt;Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" autoComplete="username" required /&gt;&lt;/label&gt;
+      {mode === 'activate' &amp;&amp; &lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" autoComplete="tel" pattern="09[0-9]{8}" placeholder="例如：0912345678" required /&gt;&lt;/label&gt;}
+      {mode === 'activate' &amp;&amp; &lt;PasswordFields /&gt;}
+      {mode === 'login' &amp;&amp; &lt;label className="block"&gt;密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="current-password" required /&gt;&lt;/label&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}{sent &amp;&amp; &lt;p role="status" className="rounded bg-green-50 p-3"&gt;{sent}&lt;/p&gt;}
+      {mode === 'activate' &amp;&amp; error &amp;&amp; &lt;div className="flex flex-wrap gap-5 text-sm"&gt;{error.includes('核對名冊') &amp;&amp; &lt;a className="underline" href="#student-activation-name"&gt;重新核對資料&lt;/a&gt;}&lt;button type="button" disabled={busy} className="underline" onClick={() =&gt; changeMode('login')}&gt;改用學員登入&lt;/button&gt;&lt;/div&gt;}
+      &lt;div className="flex flex-wrap items-center gap-5"&gt;&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '處理中…' : mode === 'activate' ? '核對並建立帳號' : mode === 'reset' ? '寄送重設密碼連結' : mode === 'confirm' ? '寄送確認信' : '登入'}&lt;/Button&gt;&lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; changeMode(mode === 'reset' || mode === 'confirm' ? 'login' : 'reset')}&gt;{mode === 'reset' || mode === 'confirm' ? '返回登入' : '忘記密碼？'}&lt;/button&gt;{mode === 'login' &amp;&amp; &lt;button type="button" disabled={busy} className="text-sm underline" onClick={() =&gt; changeMode('confirm')}&gt;重新寄送確認信&lt;/button&gt;}&lt;/div&gt;
+    &lt;/form&gt;
+  &lt;/section&gt;;
+}
+
+export function StudentActivation({ email, status, onComplete }: { email: string; status: Onboarding; onComplete: () =&gt; void }) {
+  const passwordCreated = sessionStorage.getItem('nptc-password-created') === email.toLowerCase();
+  const [state, setState] = useState(status), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [hospitals, setHospitals] = useState&lt;Hospital[]&gt;([]), [loading, setLoading] = useState(true);
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    rpc&lt;{hospitals:Hospital[]}&gt;('nptc_hospital_directory',{},controller.signal).then(data=&gt;setHospitals(data.hospitals)).catch(e=&gt;{if(e.name!=='AbortError')setError('醫院名冊無法載入，請重新整理後再試。');}).finally(()=&gt;setLoading(false));
+    return () =&gt; controller.abort();
+  }, []);
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try {
+      if (state.stage === 'unclaimed') {
+        const result = await rpc&lt;Onboarding&gt;('nptc_claim_student', { body: { name: String(fields.get('name')).trim(), phone: String(fields.get('phone')).trim() } });
+        sessionStorage.removeItem('nptc-activation-name'); sessionStorage.removeItem('nptc-activation-phone');
+        if (result.stage === 'active') onComplete(); else setState(result);
+      } else {
+        const password = passwordCreated ? null : passwordFrom(fields), hospital = String(fields.get('hospital') ?? '');
+        if (!hospitals.some(h =&gt; h.name === hospital)) throw new Error('請搜尋並點選服務醫院全名。');
+        await rpc('nptc_student_update_profile', { body: { nursingYears: Number(fields.get('nursingYears')), hospital, unit: String(fields.get('unit')).trim(), examSpecialty: fields.get('examSpecialty'), firstOsce: fields.get('firstOsce') === 'yes', birthDate: fields.get('birthDate') } });
+        if (password !== null) { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; }
+        await rpc('nptc_finish_student_activation'); sessionStorage.removeItem('nptc-password-created'); onComplete();
+      }
+    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  const student = state.student;
+  return &lt;section className="mx-auto max-w-3xl px-6 py-12"&gt;&lt;h1 className="text-2xl font-bold"&gt;完成首次啟用&lt;/h1&gt;&lt;p className="my-4"&gt;{state.stage === 'unclaimed' ? '已登入，請核對報名姓名與手機。' : '名冊已核對，請補齊個人資料並設定日後登入密碼。'}&lt;/p&gt;
+    &lt;form onSubmit={submit} className="space-y-5 rounded-xl border bg-white p-6" key={state.stage}&gt;
+      &lt;label className="block"&gt;Email（登入帳號）&lt;Input className="mt-2 h-12 px-3 md:text-base" value={email} readOnly /&gt;&lt;/label&gt;
+      {state.stage === 'unclaimed' ? &lt;&gt;&lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" defaultValue={sessionStorage.getItem('nptc-activation-name') ?? ''} required /&gt;&lt;/label&gt;&lt;label className="block"&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" name="phone" type="tel" pattern="09[0-9]{8}" defaultValue={sessionStorage.getItem('nptc-activation-phone') ?? ''} required /&gt;&lt;/label&gt;&lt;/&gt; : &lt;&gt;
+        &lt;div className="grid gap-4 sm:grid-cols-2"&gt;&lt;label&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.name ?? ''} readOnly /&gt;&lt;/label&gt;&lt;label&gt;手機電話&lt;Input className="mt-2 h-12 px-3 md:text-base" value={student?.phone ?? ''} readOnly /&gt;&lt;/label&gt;&lt;/div&gt;&lt;p className="text-sm"&gt;以上資料由管理員建立，如需更正請聯絡管理員。&lt;/p&gt;
+        &lt;label className="block"&gt;護理年資（年）&lt;Input className="mt-2 h-12 px-3 md:text-base" name="nursingYears" type="number" min={0} max={60} step={1} defaultValue={student?.nursingYears ?? ''} required /&gt;&lt;/label&gt;
+        &lt;HospitalPicker defaultValue={student?.hospital ?? ''} hospitals={hospitals} loading={loading} /&gt;
+        &lt;label className="block"&gt;服務單位&lt;Input className="mt-2 h-12 px-3 md:text-base" name="unit" maxLength={100} defaultValue={student?.unit ?? ''} required /&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;報考科別&lt;select name="examSpecialty" defaultValue={student?.examSpecialty ?? ''} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map(s =&gt; &lt;option key={s}&gt;{s}&lt;/option&gt;)}&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;是否首次報考國家 OSCE&lt;select name="firstOsce" defaultValue={student?.firstOsce == null ? '' : student.firstOsce ? 'yes' : 'no'} className="block w-full rounded border p-3" required&gt;&lt;option value=""&gt;請選擇&lt;/option&gt;&lt;option value="yes"&gt;是&lt;/option&gt;&lt;option value="no"&gt;否&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+        &lt;label className="block"&gt;出生年月日&lt;Input className="mt-2 h-12 px-3 md:text-base" name="birthDate" type="date" min="1900-01-01" max={new Date().toLocaleDateString('en-CA')} defaultValue={student?.birthDate ?? ''} required /&gt;&lt;/label&gt;
+        {!passwordCreated &amp;&amp; &lt;PasswordFields /&gt;}
+      &lt;/&gt;}
+      {error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy || (state.stage === 'profile' &amp;&amp; loading)}&gt;{busy ? '處理中…' : state.stage === 'unclaimed' ? '核對名冊' : '儲存資料並啟用帳號'}&lt;/Button&gt;
+    &lt;/form&gt;&lt;/section&gt;;
+}
+
+export function ResetStudentPassword({ onComplete, teacher = false }: { onComplete: () =&gt; void; teacher?: boolean }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  return &lt;form className="mx-auto my-12 max-w-lg space-y-5 rounded-xl border bg-white p-6" onSubmit={async event =&gt; {
+    event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+    try { const { data, error } = await supabase.auth.updateUser({ password: passwordFrom(fields) }); if (error) throw error; if (!teacher &amp;&amp; data.user?.email) sessionStorage.setItem('nptc-password-created', data.user.email.toLowerCase()); history.replaceState(null, '', teacher ? new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href : redirect()); onComplete(); }
+    catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }}&gt;&lt;h1 className="text-2xl font-bold"&gt;重設登入密碼&lt;/h1&gt;&lt;PasswordFields /&gt;{error &amp;&amp; &lt;p role="alert" className="text-red-700"&gt;{error}&lt;/p&gt;}&lt;Button className="min-h-12 px-6 text-base" type="submit" disabled={busy}&gt;{busy ? '儲存中…' : '儲存新密碼'}&lt;/Button&gt;&lt;/form&gt;;
+}
+</pre></details><h2>lib/student-access-errors.ts</h2><details><summary>修改前完整檔案</summary><pre>（新增檔案，原本不存在）</pre></details><details><summary>修改後完整檔案</summary><pre>import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js';
+
+// 公開頁只提供操作引導，不回傳帳號查詢結果或伺服器的原始錯誤。
+export function studentActivationError(error: unknown): string {
+  if (error instanceof FunctionsHttpError) {
+    const status = (error.context as Response | undefined)?.status;
+    if (status === 429) return '操作過於頻繁，請稍後再試；已有帳號者可直接登入或使用忘記密碼。';
+    if (status === 400 || status === 409) {
+      return '帳號建立未完成。請核對名冊中的姓名、Email 與完整手機號碼；若曾使用本平台，請改用學員登入或忘記密碼。';
+    }
+    return '帳號建立服務暫時無法使用，請稍後重試或聯絡管理員。';
+  }
+  if (error instanceof FunctionsFetchError || error instanceof FunctionsRelayError) {
+    return '目前無法連線至帳號建立服務，請確認網路後重試；若持續失敗，請聯絡管理員。';
+  }
+  return '帳號建立服務暫時無法使用，請稍後重試或聯絡管理員。';
+}
+</pre></details><h2>tests/student-access-errors.mjs</h2><details><summary>修改前完整檔案</summary><pre>（新增檔案，原本不存在）</pre></details><details><summary>修改後完整檔案</summary><pre>import assert from 'node:assert/strict';
+import { FunctionsHttpError, FunctionsFetchError, FunctionsRelayError } from '@supabase/supabase-js';
+import { studentActivationError } from '../lib/student-access-errors.ts';
+const http=status=&gt;new FunctionsHttpError(new Response('private server details',{status}));
+for(const status of [400,409]) assert.match(studentActivationError(http(status)),/核對名冊.*學員登入或忘記密碼/);
+for(const status of [401,403,404,500,503]) {
+ assert.match(studentActivationError(http(status)),/服務暫時無法使用/);
+ assert.doesNotMatch(studentActivationError(http(status)),/核對名冊|private/);
+}
+assert.match(studentActivationError(http(429)),/操作過於頻繁/);
+for(const failure of [new FunctionsFetchError(Error('private')),new FunctionsRelayError(Error('private'))])assert.match(studentActivationError(failure),/無法連線/);
+assert.doesNotMatch(studentActivationError(Error('private credentials')),/private|credentials/);
+console.log('PASS: activation errors distinguish service outages, network failures, safe validation guidance and rate limiting without exposing raw server details');
+</pre></details></html>
