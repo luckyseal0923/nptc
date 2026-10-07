@@ -1,0 +1,378 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>非管理員後臺入口：程式修改對照</title><style>body{max-width:1100px;margin:40px auto;padding:20px;font:16px/1.7 sans-serif}pre{white-space:pre-wrap;padding:20px;background:#f1f5f3;font:13px/1.6 monospace}summary{cursor:pointer;padding:10px;background:#eaf2df}</style><h1>非管理員後臺入口提示</h1><p>共用登入版面，新增目前帳號提示、切換登入及點選後展開申請表。以下提供各檔案完整修改前後內容。</p><h2>components/backend-login.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+
+export function BackendLogin() {
+  const [mode, setMode] = useState&lt;'login' | 'signup' | 'reset'&gt;('login');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const redirect = new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href;
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault();
+    const form = event.currentTarget, fields = new FormData(form);
+    const email = String(fields.get('email')).trim().toLowerCase();
+    setBusy(true); setError(''); setNotice('');
+    try {
+      if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect}?reset=1` });
+        if (error) throw error;
+        setNotice('若此 Email 已建立帳號，您將收到設定密碼的信件。請開啟最新一封信。');
+      } else {
+        const password = String(fields.get('password'));
+        if (mode === 'signup') {
+          const name = String(fields.get('name')).trim(), reason = String(fields.get('reason')).trim();
+          if (!name || !reason) throw new Error('請填寫姓名與申請用途。');
+          if (password.length &lt; 8 || password !== fields.get('confirm')) throw new Error('密碼須至少 8 個字元，且兩次輸入須相同。');
+          const { data, error } = await supabase.auth.signUp({ email, password, options: {
+            emailRedirectTo: redirect,
+            data: { backend_application: { name, reason } },
+          } });
+          if (error) throw error;
+          if (!data.session) setNotice('請至信箱完成首次驗證，返回後系統會送出申請，等待管理員啟用。若已有帳號，請直接登入或設定密碼。');
+          form.reset();
+        } else {
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw new Error(error.code === 'email_not_confirmed' ? '請先完成信箱中的首次驗證。' : '登入失敗，請確認 Email 與密碼；原先使用信件登入者，請先點選「忘記密碼」。');
+        }
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '操作失敗，請稍後重試。'); }
+    finally { setBusy(false); }
+  }
+  return &lt;div className="mx-auto grid max-w-6xl gap-12 px-6 py-16 lg:grid-cols-2 lg:items-start"&gt;
+    &lt;section className="lg:pt-32"&gt;&lt;p className="mb-4 text-xs font-bold tracking-widest"&gt;TEACHING &amp; ASSESSMENT&lt;/p&gt;&lt;h1 className="text-4xl font-black leading-tight"&gt;讓每一份回饋，成為學員的下一步。&lt;/h1&gt;&lt;p className="mt-7 leading-8"&gt;建立學員名冊、登錄 OSCE 分數與回饋，並逐題管理成績公布。&lt;/p&gt;&lt;/section&gt;
+    &lt;section className="rounded-2xl border border-[#d5e0d8] bg-white p-8 shadow-sm"&gt;
+      &lt;h2 className="text-2xl font-black"&gt;{mode === 'login' ? '後臺管理系統登入' : mode === 'signup' ? '申請後臺帳號' : '忘記密碼'}&lt;/h2&gt;
+      &lt;p className="mt-3 text-sm leading-6"&gt;{mode === 'login' ? '使用 Email 與密碼登入；帳號須經管理員啟用。' : mode === 'signup' ? '填寫申請資料與密碼，完成首次信箱驗證後，等待管理員啟用。' : '原先使用信件登入的帳號，也可以在這裡設定密碼。'}&lt;/p&gt;
+      &lt;div className="mt-5 flex flex-wrap gap-4 text-sm"&gt;{(['signup', 'reset'] as const).map(m =&gt; &lt;button key={m} type="button" disabled={busy} aria-pressed={mode === m} className="underline" onClick={() =&gt; { setMode(m); setError(''); setNotice(''); }}&gt;{m === 'signup' ? '申請帳號' : '忘記密碼'}&lt;/button&gt;)}&lt;/div&gt;
+      &lt;form key={mode} onSubmit={submit} className="mt-7"&gt;&lt;fieldset disabled={busy} className="space-y-5"&gt;
+        {mode === 'signup' &amp;&amp; &lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" required maxLength={100} autoComplete="name" /&gt;&lt;/label&gt;}
+        &lt;label className="block"&gt;Email&lt;Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" required autoComplete="username" /&gt;&lt;/label&gt;
+        {mode !== 'reset' &amp;&amp; &lt;label className="block"&gt;{mode === 'signup' ? '設定密碼（至少 8 個字元）' : '密碼'}&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" required minLength={mode === 'signup' ? 8 : undefined} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /&gt;&lt;/label&gt;}
+        {mode === 'signup' &amp;&amp; &lt;&gt;&lt;label className="block"&gt;再次輸入密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" required minLength={8} autoComplete="new-password" /&gt;&lt;/label&gt;&lt;label className="block"&gt;申請用途&lt;Input className="mt-2 h-12 px-3 md:text-base" name="reason" required maxLength={500} placeholder="例如：工作坊評分與名冊管理" /&gt;&lt;/label&gt;&lt;/&gt;}
+        {error &amp;&amp; &lt;p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700"&gt;{error}&lt;/p&gt;}
+        {notice &amp;&amp; &lt;p role="status" className="rounded bg-green-50 p-3 text-sm"&gt;{notice}&lt;/p&gt;}
+        &lt;Button type="submit" className="h-12 w-full text-base font-bold"&gt;{busy ? '處理中…' : mode === 'login' ? '登入後臺' : mode === 'signup' ? '申請帳號' : '寄送設定密碼連結'}&lt;/Button&gt;
+      &lt;/fieldset&gt;&lt;/form&gt;
+      {mode !== 'login' &amp;&amp; &lt;button type="button" disabled={busy} className="mt-5 text-sm underline" onClick={() =&gt; { setMode('login'); setError(''); setNotice(''); }}&gt;返回登入&lt;/button&gt;}
+    &lt;/section&gt;
+  &lt;/div&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+
+export function BackendEntryLayout({ children }: { children: React.ReactNode }) {
+  return &lt;div className="mx-auto grid max-w-6xl gap-12 px-6 py-16 lg:grid-cols-2 lg:items-start"&gt;
+    &lt;section className="lg:pt-32"&gt;&lt;p className="mb-4 text-xs font-bold tracking-widest"&gt;TEACHING &amp; ASSESSMENT&lt;/p&gt;&lt;h1 className="text-4xl font-black leading-tight"&gt;讓每一份回饋，成為學員的下一步。&lt;/h1&gt;&lt;p className="mt-7 leading-8"&gt;建立學員名冊、登錄 OSCE 分數與回饋，並逐題管理成績公布。&lt;/p&gt;&lt;/section&gt;
+    &lt;section className="rounded-2xl border border-[#d5e0d8] bg-white p-8 shadow-sm"&gt;{children}&lt;/section&gt;
+  &lt;/div&gt;;
+}
+
+export function BackendLogin() {
+  const [mode, setMode] = useState&lt;'login' | 'signup' | 'reset'&gt;('login');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const redirect = new URL(`${import.meta.env.BASE_URL}teacher/`, location.origin).href;
+  async function submit(event: React.FormEvent&lt;HTMLFormElement&gt;) {
+    event.preventDefault();
+    const form = event.currentTarget, fields = new FormData(form);
+    const email = String(fields.get('email')).trim().toLowerCase();
+    setBusy(true); setError(''); setNotice('');
+    try {
+      if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect}?reset=1` });
+        if (error) throw error;
+        setNotice('若此 Email 已建立帳號，您將收到設定密碼的信件。請開啟最新一封信。');
+      } else {
+        const password = String(fields.get('password'));
+        if (mode === 'signup') {
+          const name = String(fields.get('name')).trim(), reason = String(fields.get('reason')).trim();
+          if (!name || !reason) throw new Error('請填寫姓名與申請用途。');
+          if (password.length &lt; 8 || password !== fields.get('confirm')) throw new Error('密碼須至少 8 個字元，且兩次輸入須相同。');
+          const { data, error } = await supabase.auth.signUp({ email, password, options: {
+            emailRedirectTo: redirect,
+            data: { backend_application: { name, reason } },
+          } });
+          if (error) throw error;
+          if (!data.session) setNotice('請至信箱完成首次驗證，返回後點選「申請後臺管理權限」送出申請，等待管理員啟用。若已有帳號，請直接登入或設定密碼。');
+          form.reset();
+        } else {
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw new Error(error.code === 'email_not_confirmed' ? '請先完成信箱中的首次驗證。' : '登入失敗，請確認 Email 與密碼；原先使用信件登入者，請先點選「忘記密碼」。');
+        }
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '操作失敗，請稍後重試。'); }
+    finally { setBusy(false); }
+  }
+  return &lt;BackendEntryLayout&gt;
+      &lt;h2 className="text-2xl font-black"&gt;{mode === 'login' ? '後臺管理系統登入' : mode === 'signup' ? '申請後臺帳號' : '忘記密碼'}&lt;/h2&gt;
+      &lt;p className="mt-3 text-sm leading-6"&gt;{mode === 'login' ? '使用 Email 與密碼登入；帳號須經管理員啟用。' : mode === 'signup' ? '填寫申請資料與密碼，完成首次信箱驗證後，等待管理員啟用。' : '原先使用信件登入的帳號，也可以在這裡設定密碼。'}&lt;/p&gt;
+      &lt;div className="mt-5 flex flex-wrap gap-4 text-sm"&gt;{(['signup', 'reset'] as const).map(m =&gt; &lt;button key={m} type="button" disabled={busy} aria-pressed={mode === m} className="underline" onClick={() =&gt; { setMode(m); setError(''); setNotice(''); }}&gt;{m === 'signup' ? '申請帳號' : '忘記密碼'}&lt;/button&gt;)}&lt;/div&gt;
+      &lt;form key={mode} onSubmit={submit} className="mt-7"&gt;&lt;fieldset disabled={busy} className="space-y-5"&gt;
+        {mode === 'signup' &amp;&amp; &lt;label className="block"&gt;姓名&lt;Input className="mt-2 h-12 px-3 md:text-base" name="name" required maxLength={100} autoComplete="name" /&gt;&lt;/label&gt;}
+        &lt;label className="block"&gt;Email&lt;Input className="mt-2 h-12 px-3 md:text-base" name="email" type="email" required autoComplete="username" /&gt;&lt;/label&gt;
+        {mode !== 'reset' &amp;&amp; &lt;label className="block"&gt;{mode === 'signup' ? '設定密碼（至少 8 個字元）' : '密碼'}&lt;Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" required minLength={mode === 'signup' ? 8 : undefined} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /&gt;&lt;/label&gt;}
+        {mode === 'signup' &amp;&amp; &lt;&gt;&lt;label className="block"&gt;再次輸入密碼&lt;Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" required minLength={8} autoComplete="new-password" /&gt;&lt;/label&gt;&lt;label className="block"&gt;申請用途&lt;Input className="mt-2 h-12 px-3 md:text-base" name="reason" required maxLength={500} placeholder="例如：工作坊評分與名冊管理" /&gt;&lt;/label&gt;&lt;/&gt;}
+        {error &amp;&amp; &lt;p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700"&gt;{error}&lt;/p&gt;}
+        {notice &amp;&amp; &lt;p role="status" className="rounded bg-green-50 p-3 text-sm"&gt;{notice}&lt;/p&gt;}
+        &lt;Button type="submit" className="h-12 w-full text-base font-bold"&gt;{busy ? '處理中…' : mode === 'login' ? '登入後臺' : mode === 'signup' ? '申請帳號' : '寄送設定密碼連結'}&lt;/Button&gt;
+      &lt;/fieldset&gt;&lt;/form&gt;
+      {mode !== 'login' &amp;&amp; &lt;button type="button" disabled={busy} className="mt-5 text-sm underline" onClick={() =&gt; { setMode('login'); setError(''); setNotice(''); }}&gt;返回登入&lt;/button&gt;}
+  &lt;/BackendEntryLayout&gt;;
+}
+</pre></details><h2>components/backend-accounts.tsx</h2><details><summary>修改前完整檔案</summary><pre>import { useEffect, useState } from 'react';
+import { rpc, supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
+
+type Account = { email: string; name: string; reason: string; status: 'pending' | 'active' | 'disabled'; protected?: boolean; systemAdmin?: boolean };
+type Status = { application: Account | null; canReview: boolean };
+const labels = { pending: '等待審核', active: '已啟用', disabled: '已停用' };
+
+export function BackendApplication({ email }: { email: string }) {
+  const [status, setStatus] = useState&lt;Status | null&gt;(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function refresh() {
+    setError('');
+    try {
+      let current = await rpc&lt;Status&gt;('nptc_backend_account_status');
+      if (!current.application) {
+        const { data, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        // Metadata is application text only. Approval remains in the guarded RPC.
+        const draft = data.user?.user_metadata?.backend_application;
+        if (typeof draft?.name === 'string' &amp;&amp; typeof draft?.reason === 'string' &amp;&amp; draft.name.trim() &amp;&amp; draft.reason.trim()) {
+          current = await rpc&lt;Status&gt;('nptc_apply_backend_account', { body: { name: draft.name, reason: draft.reason } });
+        }
+      }
+      setStatus(current);
+    }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void refresh(); }, []);
+  return &lt;section className="workspace"&gt;&lt;div className="data-panel"&gt;&lt;h1&gt;後臺帳號申請&lt;/h1&gt;&lt;p className="form-help"&gt;已驗證 Email：{email}&lt;/p&gt;
+    {error &amp;&amp; &lt;p role="alert" className="notice error"&gt;{error}&lt;/p&gt;}
+    {!status ? &lt;Button className="action" onClick={refresh}&gt;重新載入申請狀態&lt;/Button&gt; : status.application ? &lt;&gt;
+      &lt;h2&gt;{labels[status.application.status]}&lt;/h2&gt;&lt;p className="form-help"&gt;{status.application.status === 'pending' ? '申請已送出，請等待系統管理者啟用帳號。' : status.application.status === 'disabled' ? '目前無法使用後臺功能，請聯絡系統管理者協助。' : '帳號已啟用，請重新載入進入後臺。'}&lt;/p&gt;
+      &lt;Button className="action" onClick={() =&gt; location.reload()}&gt;重新確認啟用狀態&lt;/Button&gt;
+    &lt;/&gt; : &lt;form className="entry-form" onSubmit={async (event) =&gt; {
+      event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+      try { setStatus(await rpc&lt;Status&gt;('nptc_apply_backend_account', { body: { name: fields.get('name'), reason: fields.get('reason') } })); }
+      catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+    }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name="name" required maxLength={100} autoComplete="name" /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name="reason" required maxLength={500} placeholder="例如：協助工作坊評分與名冊管理" /&gt;&lt;/label&gt;&lt;p className="form-help"&gt;系統管理者啟用後，即以一般管理員身分管理工作坊、學員名冊與成績。&lt;/p&gt;&lt;Button className="action" type="submit"&gt;{busy ? '送出中…' : '送出帳號申請'}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+  &lt;/div&gt;&lt;/section&gt;;
+}
+
+export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
+  const [canReview, setCanReview] = useState(false);
+  const [accounts, setAccounts] = useState&lt;Account[]&gt;([]);
+  const [open, setOpen] = useState(expanded);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState&lt;string | null&gt;(null);
+  async function load() {
+    setError('');
+    try {
+      const status = await rpc&lt;Status&gt;('nptc_backend_account_status'); setCanReview(status.canReview);
+      if (status.canReview) setAccounts(await rpc&lt;Account[]&gt;('nptc_backend_accounts'));
+    } catch(e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  if (!canReview &amp;&amp; !error) return null;
+  return &lt;section className="data-panel" style={{ marginTop: 24 }}&gt;
+    &lt;div className="panel-heading"&gt;&lt;h2&gt;帳號管理&lt;/h2&gt;{canReview &amp;&amp; &lt;Button className="action secondary" onClick={() =&gt; setOpen(!open)}&gt;{open ? '收合帳號管理' : `查看帳號（${accounts.filter(a =&gt; a.status === 'pending').length} 筆待審核）`}&lt;/Button&gt;}&lt;/div&gt;
+    {error &amp;&amp; &lt;p role="alert" className="notice error"&gt;{error}&lt;Button className="action secondary" onClick={load}&gt;重試&lt;/Button&gt;&lt;/p&gt;}
+    {open &amp;&amp; &lt;&gt;&lt;p className="form-help"&gt;一般管理員可管理所有工作坊；系統管理者可編輯、啟用與停用帳號。停用後，後續資料操作會被拒絕。&lt;/p&gt;&lt;div className="station-settings-grid"&gt;{accounts.map(account =&gt; &lt;article className="station-setting account-card" key={account.email}&gt;
+      &lt;h3&gt;{account.name}&lt;/h3&gt;&lt;p style={{ overflowWrap: 'anywhere' }}&gt;{account.email}&lt;/p&gt;&lt;p&gt;{account.reason}&lt;/p&gt;&lt;p className={`form-help account-status ${account.status}`}&gt;{labels[account.status]} · {account.systemAdmin ? '系統管理者' : '一般管理員'}&lt;/p&gt;
+      {editing === account.email &amp;&amp; &lt;form className="entry-form" onSubmit={async (event) =&gt; {
+        event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+        try { await rpc('nptc_update_backend_account', { body: { email: account.email, name: fields.get('name'), reason: fields.get('reason') } }); setEditing(null); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name="name" required maxLength={100} defaultValue={account.name} /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name="reason" required maxLength={500} defaultValue={account.reason} /&gt;&lt;/label&gt;&lt;Button className="action" type="submit"&gt;儲存修改&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+      &lt;Button className="action secondary" disabled={busy} onClick={() =&gt; setEditing(editing === account.email ? null : account.email)}&gt;{editing === account.email ? '取消修改' : '修改資料'}&lt;/Button&gt;
+      {account.status === 'active' &amp;&amp; !account.protected &amp;&amp; &lt;Button className="action secondary" disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError('');
+        try { await rpc('nptc_set_backend_role', { body: { email: account.email, systemAdmin: !account.systemAdmin } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.systemAdmin ? '改為一般管理員' : '升為系統管理者'}&lt;/Button&gt;}
+      {!account.protected &amp;&amp; &lt;Button className={account.status === 'active' ? 'action destructive' : 'action'} disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError('');
+        try { await rpc('nptc_set_backend_account', { body: { email: account.email, enabled: account.status !== 'active' } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.status === 'active' ? '停用帳號' : '啟用帳號'}&lt;/Button&gt;}
+    &lt;/article&gt;)}&lt;/div&gt;&lt;/&gt;}
+  &lt;/section&gt;;
+}
+
+type ArchivedWorkshop = { id: string; name: string; archivedAt: string };
+export function ArchivedWorkshops() {
+  const [items, setItems] = useState&lt;ArchivedWorkshop[]&gt;([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState&lt;string | null&gt;(null);
+  async function load() {
+    try { setError(''); setItems(await rpc&lt;ArchivedWorkshop[]&gt;('nptc_archived_workshops')); }
+    catch (cause) { setError((cause as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  return &lt;section className="data-panel" style={{ marginTop: 24 }}&gt;&lt;div className="panel-heading"&gt;&lt;h2&gt;已封存梯次&lt;/h2&gt;&lt;Button className="action secondary" onClick={load}&gt;重新整理&lt;/Button&gt;&lt;/div&gt;
+    &lt;p className="form-help"&gt;封存會保留名冊與成績，並停止修改。還原後會重新出現在梯次清單；永久刪除會移除該梯次及其名冊、成績與回饋。&lt;/p&gt;
+    {error &amp;&amp; &lt;p role="alert" className="notice error"&gt;{error}&lt;/p&gt;}
+    {!items.length ? &lt;p&gt;目前沒有已封存梯次。&lt;/p&gt; : &lt;div className="station-settings-grid"&gt;{items.map(item =&gt; &lt;article className="station-setting" key={item.id}&gt;
+      &lt;h3&gt;{item.name}&lt;/h3&gt;&lt;p className="form-help"&gt;封存時間：{new Date(item.archivedAt).toLocaleString('zh-TW')}&lt;/p&gt;
+      &lt;Button className="action secondary" disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError('');
+        try { await rpc('nptc_set_workshop_archived', { body: { workshopId: item.id, archived: false } }); await load(); }
+        catch(cause) { setError((cause as Error).message); } finally { setBusy(false); }
+      }}&gt;還原梯次&lt;/Button&gt;
+      &lt;Button className="action destructive" disabled={busy} onClick={() =&gt; setDeleting(deleting === item.id ? null : item.id)}&gt;{deleting === item.id ? '取消刪除' : '永久刪除'}&lt;/Button&gt;
+      {deleting === item.id &amp;&amp; &lt;ConfirmWorkshopAction action="delete" workshop={item} onCancel={() =&gt; setDeleting(null)} onSuccess={async () =&gt; { setDeleting(null); await load(); }}/&gt;}
+    &lt;/article&gt;)}&lt;/div&gt;}
+  &lt;/section&gt;;
+}
+</pre></details><details><summary>修改後完整檔案</summary><pre>import { useEffect, useState } from 'react';
+import { rpc, supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
+import { BackendEntryLayout } from '@/components/backend-login';
+import Link from '@/components/link';
+
+type Account = { email: string; name: string; reason: string; status: 'pending' | 'active' | 'disabled'; protected?: boolean; systemAdmin?: boolean };
+type Status = { application: Account | null; canReview: boolean };
+const labels = { pending: '等待審核', active: '已啟用', disabled: '已停用' };
+
+export function BackendApplication({ email }: { email: string }) {
+  const [applying, setApplying] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
+  return &lt;BackendEntryLayout&gt;
+    &lt;h2 className="text-2xl font-black"&gt;後臺管理系統登入&lt;/h2&gt;
+    &lt;div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700"&gt;
+      &lt;p className="break-all font-bold"&gt;目前登入帳號：{email}&lt;/p&gt;
+      &lt;p className="mt-2 leading-7"&gt;此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;div className="mt-6 flex flex-col gap-4"&gt;
+      &lt;Button type="button" disabled={signingOut} className="h-auto min-h-12 whitespace-normal py-3" onClick={async () =&gt; {
+        setSigningOut(true); setSignOutError('');
+        try {
+          const { error } = await supabase.auth.signOut({ scope: 'local' });
+          if (error) throw error;
+        } catch {
+          setSignOutError('登出未完成，請稍後重試。');
+          setSigningOut(false);
+        }
+      }}&gt;{signingOut ? '登出中…' : '登出並使用管理員帳號登入'}&lt;/Button&gt;
+      &lt;Button type="button" variant="outline" disabled={signingOut} aria-expanded={applying} aria-controls="backend-permission-application" onClick={() =&gt; setApplying(!applying)}&gt;{applying ? '收合申請表' : '申請後臺管理權限'}&lt;/Button&gt;
+      &lt;Link href="/student/" className="text-center underline"&gt;返回學員專區&lt;/Link&gt;
+    &lt;/div&gt;
+    {signOutError &amp;&amp; &lt;p role="alert" className="mt-4 text-red-700"&gt;{signOutError}&lt;/p&gt;}
+    {applying &amp;&amp; &lt;div id="backend-permission-application" className="mt-7 border-t pt-6"&gt;&lt;BackendApplicationForm email={email}/&gt;&lt;/div&gt;}
+  &lt;/BackendEntryLayout&gt;;
+}
+
+function BackendApplicationForm({ email }: { email: string }) {
+  const [status, setStatus] = useState&lt;Status | null&gt;(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function refresh() {
+    setError('');
+    try {
+      let current = await rpc&lt;Status&gt;('nptc_backend_account_status');
+      if (!current.application) {
+        const { data, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        // Metadata is application text only. Approval remains in the guarded RPC.
+        const draft = data.user?.user_metadata?.backend_application;
+        if (typeof draft?.name === 'string' &amp;&amp; typeof draft?.reason === 'string' &amp;&amp; draft.name.trim() &amp;&amp; draft.reason.trim()) {
+          current = await rpc&lt;Status&gt;('nptc_apply_backend_account', { body: { name: draft.name, reason: draft.reason } });
+        }
+      }
+      setStatus(current);
+    }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void refresh(); }, []);
+  return &lt;section&gt;&lt;h3 className="text-xl font-bold"&gt;申請後臺管理權限&lt;/h3&gt;&lt;p className="form-help break-all"&gt;申請帳號：{email}&lt;/p&gt;
+    {error &amp;&amp; &lt;p role="alert" className="notice error"&gt;{error}&lt;/p&gt;}
+    {!status ? &lt;Button className="action" onClick={refresh}&gt;重新載入申請狀態&lt;/Button&gt; : status.application ? &lt;&gt;
+      &lt;h2&gt;{labels[status.application.status]}&lt;/h2&gt;&lt;p className="form-help"&gt;{status.application.status === 'pending' ? '申請已送出，請等待系統管理者啟用帳號。' : status.application.status === 'disabled' ? '目前無法使用後臺功能，請聯絡系統管理者協助。' : '帳號已啟用，請重新載入進入後臺。'}&lt;/p&gt;
+      &lt;Button className="action" onClick={() =&gt; location.reload()}&gt;重新確認啟用狀態&lt;/Button&gt;
+    &lt;/&gt; : &lt;form className="entry-form" onSubmit={async (event) =&gt; {
+      event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+      try { setStatus(await rpc&lt;Status&gt;('nptc_apply_backend_account', { body: { name: fields.get('name'), reason: fields.get('reason') } })); }
+      catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+    }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name="name" required maxLength={100} autoComplete="name" /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name="reason" required maxLength={500} placeholder="例如：協助工作坊評分與名冊管理" /&gt;&lt;/label&gt;&lt;p className="form-help"&gt;系統管理者啟用後，即以一般管理員身分管理工作坊、學員名冊與成績。&lt;/p&gt;&lt;Button className="action" type="submit"&gt;{busy ? '送出中…' : '送出帳號申請'}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+  &lt;/section&gt;;
+}
+
+export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
+  const [canReview, setCanReview] = useState(false);
+  const [accounts, setAccounts] = useState&lt;Account[]&gt;([]);
+  const [open, setOpen] = useState(expanded);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState&lt;string | null&gt;(null);
+  async function load() {
+    setError('');
+    try {
+      const status = await rpc&lt;Status&gt;('nptc_backend_account_status'); setCanReview(status.canReview);
+      if (status.canReview) setAccounts(await rpc&lt;Account[]&gt;('nptc_backend_accounts'));
+    } catch(e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  if (!canReview &amp;&amp; !error) return null;
+  return &lt;section className="data-panel" style={{ marginTop: 24 }}&gt;
+    &lt;div className="panel-heading"&gt;&lt;h2&gt;帳號管理&lt;/h2&gt;{canReview &amp;&amp; &lt;Button className="action secondary" onClick={() =&gt; setOpen(!open)}&gt;{open ? '收合帳號管理' : `查看帳號（${accounts.filter(a =&gt; a.status === 'pending').length} 筆待審核）`}&lt;/Button&gt;}&lt;/div&gt;
+    {error &amp;&amp; &lt;p role="alert" className="notice error"&gt;{error}&lt;Button className="action secondary" onClick={load}&gt;重試&lt;/Button&gt;&lt;/p&gt;}
+    {open &amp;&amp; &lt;&gt;&lt;p className="form-help"&gt;一般管理員可管理所有工作坊；系統管理者可編輯、啟用與停用帳號。停用後，後續資料操作會被拒絕。&lt;/p&gt;&lt;div className="station-settings-grid"&gt;{accounts.map(account =&gt; &lt;article className="station-setting account-card" key={account.email}&gt;
+      &lt;h3&gt;{account.name}&lt;/h3&gt;&lt;p style={{ overflowWrap: 'anywhere' }}&gt;{account.email}&lt;/p&gt;&lt;p&gt;{account.reason}&lt;/p&gt;&lt;p className={`form-help account-status ${account.status}`}&gt;{labels[account.status]} · {account.systemAdmin ? '系統管理者' : '一般管理員'}&lt;/p&gt;
+      {editing === account.email &amp;&amp; &lt;form className="entry-form" onSubmit={async (event) =&gt; {
+        event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError('');
+        try { await rpc('nptc_update_backend_account', { body: { email: account.email, name: fields.get('name'), reason: fields.get('reason') } }); setEditing(null); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name="name" required maxLength={100} defaultValue={account.name} /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name="reason" required maxLength={500} defaultValue={account.reason} /&gt;&lt;/label&gt;&lt;Button className="action" type="submit"&gt;儲存修改&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+      &lt;Button className="action secondary" disabled={busy} onClick={() =&gt; setEditing(editing === account.email ? null : account.email)}&gt;{editing === account.email ? '取消修改' : '修改資料'}&lt;/Button&gt;
+      {account.status === 'active' &amp;&amp; !account.protected &amp;&amp; &lt;Button className="action secondary" disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError('');
+        try { await rpc('nptc_set_backend_role', { body: { email: account.email, systemAdmin: !account.systemAdmin } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.systemAdmin ? '改為一般管理員' : '升為系統管理者'}&lt;/Button&gt;}
+      {!account.protected &amp;&amp; &lt;Button className={account.status === 'active' ? 'action destructive' : 'action'} disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError('');
+        try { await rpc('nptc_set_backend_account', { body: { email: account.email, enabled: account.status !== 'active' } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.status === 'active' ? '停用帳號' : '啟用帳號'}&lt;/Button&gt;}
+    &lt;/article&gt;)}&lt;/div&gt;&lt;/&gt;}
+  &lt;/section&gt;;
+}
+
+type ArchivedWorkshop = { id: string; name: string; archivedAt: string };
+export function ArchivedWorkshops() {
+  const [items, setItems] = useState&lt;ArchivedWorkshop[]&gt;([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState&lt;string | null&gt;(null);
+  async function load() {
+    try { setError(''); setItems(await rpc&lt;ArchivedWorkshop[]&gt;('nptc_archived_workshops')); }
+    catch (cause) { setError((cause as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  return &lt;section className="data-panel" style={{ marginTop: 24 }}&gt;&lt;div className="panel-heading"&gt;&lt;h2&gt;已封存梯次&lt;/h2&gt;&lt;Button className="action secondary" onClick={load}&gt;重新整理&lt;/Button&gt;&lt;/div&gt;
+    &lt;p className="form-help"&gt;封存會保留名冊與成績，並停止修改。還原後會重新出現在梯次清單；永久刪除會移除該梯次及其名冊、成績與回饋。&lt;/p&gt;
+    {error &amp;&amp; &lt;p role="alert" className="notice error"&gt;{error}&lt;/p&gt;}
+    {!items.length ? &lt;p&gt;目前沒有已封存梯次。&lt;/p&gt; : &lt;div className="station-settings-grid"&gt;{items.map(item =&gt; &lt;article className="station-setting" key={item.id}&gt;
+      &lt;h3&gt;{item.name}&lt;/h3&gt;&lt;p className="form-help"&gt;封存時間：{new Date(item.archivedAt).toLocaleString('zh-TW')}&lt;/p&gt;
+      &lt;Button className="action secondary" disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError('');
+        try { await rpc('nptc_set_workshop_archived', { body: { workshopId: item.id, archived: false } }); await load(); }
+        catch(cause) { setError((cause as Error).message); } finally { setBusy(false); }
+      }}&gt;還原梯次&lt;/Button&gt;
+      &lt;Button className="action destructive" disabled={busy} onClick={() =&gt; setDeleting(deleting === item.id ? null : item.id)}&gt;{deleting === item.id ? '取消刪除' : '永久刪除'}&lt;/Button&gt;
+      {deleting === item.id &amp;&amp; &lt;ConfirmWorkshopAction action="delete" workshop={item} onCancel={() =&gt; setDeleting(null)} onSuccess={async () =&gt; { setDeleting(null); await load(); }}/&gt;}
+    &lt;/article&gt;)}&lt;/div&gt;}
+  &lt;/section&gt;;
+}
+</pre></details></html>

@@ -3,12 +3,43 @@ import { rpc, supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
+import { BackendEntryLayout } from '@/components/backend-login';
+import Link from '@/components/link';
 
 type Account = { email: string; name: string; reason: string; status: 'pending' | 'active' | 'disabled'; protected?: boolean; systemAdmin?: boolean };
 type Status = { application: Account | null; canReview: boolean };
 const labels = { pending: '等待審核', active: '已啟用', disabled: '已停用' };
 
 export function BackendApplication({ email }: { email: string }) {
+  const [applying, setApplying] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
+  return <BackendEntryLayout>
+    <h2 className="text-2xl font-black">後臺管理系統登入</h2>
+    <div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+      <p className="break-all font-bold">目前登入帳號：{email}</p>
+      <p className="mt-2 leading-7">此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。</p>
+    </div>
+    <div className="mt-6 flex flex-col gap-4">
+      <Button type="button" disabled={signingOut} className="h-auto min-h-12 whitespace-normal py-3" onClick={async () => {
+        setSigningOut(true); setSignOutError('');
+        try {
+          const { error } = await supabase.auth.signOut({ scope: 'local' });
+          if (error) throw error;
+        } catch {
+          setSignOutError('登出未完成，請稍後重試。');
+          setSigningOut(false);
+        }
+      }}>{signingOut ? '登出中…' : '登出並使用管理員帳號登入'}</Button>
+      <Button type="button" variant="outline" disabled={signingOut} aria-expanded={applying} aria-controls="backend-permission-application" onClick={() => setApplying(!applying)}>{applying ? '收合申請表' : '申請後臺管理權限'}</Button>
+      <Link href="/student/" className="text-center underline">返回學員專區</Link>
+    </div>
+    {signOutError && <p role="alert" className="mt-4 text-red-700">{signOutError}</p>}
+    {applying && <div id="backend-permission-application" className="mt-7 border-t pt-6"><BackendApplicationForm email={email}/></div>}
+  </BackendEntryLayout>;
+}
+
+function BackendApplicationForm({ email }: { email: string }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,7 +61,7 @@ export function BackendApplication({ email }: { email: string }) {
     catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { void refresh(); }, []);
-  return <section className="workspace"><div className="data-panel"><h1>後臺帳號申請</h1><p className="form-help">已驗證 Email：{email}</p>
+  return <section><h3 className="text-xl font-bold">申請後臺管理權限</h3><p className="form-help break-all">申請帳號：{email}</p>
     {error && <p role="alert" className="notice error">{error}</p>}
     {!status ? <Button className="action" onClick={refresh}>重新載入申請狀態</Button> : status.application ? <>
       <h2>{labels[status.application.status]}</h2><p className="form-help">{status.application.status === 'pending' ? '申請已送出，請等待系統管理者啟用帳號。' : status.application.status === 'disabled' ? '目前無法使用後臺功能，請聯絡系統管理者協助。' : '帳號已啟用，請重新載入進入後臺。'}</p>
@@ -40,7 +71,7 @@ export function BackendApplication({ email }: { email: string }) {
       try { setStatus(await rpc<Status>('nptc_apply_backend_account', { body: { name: fields.get('name'), reason: fields.get('reason') } })); }
       catch(e) { setError((e as Error).message); } finally { setBusy(false); }
     }}><fieldset disabled={busy}><label>姓名<Input name="name" required maxLength={100} autoComplete="name" /></label><label>申請用途<Input name="reason" required maxLength={500} placeholder="例如：協助工作坊評分與名冊管理" /></label><p className="form-help">系統管理者啟用後，即以一般管理員身分管理工作坊、學員名冊與成績。</p><Button className="action" type="submit">{busy ? '送出中…' : '送出帳號申請'}</Button></fieldset></form>}
-  </div></section>;
+  </section>;
 }
 
 export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
