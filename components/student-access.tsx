@@ -9,7 +9,13 @@ import { studentActivationError, studentAccountExists } from '@/lib/student-acce
 type Student = { name: string; email: string; phone: string; nursingYears: number | null; serviceKind?: string; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
 export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
 const redirect = () => new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
-const message = (cause: unknown) => cause instanceof Error ? cause.message : '操作未完成，請稍後重試。';
+const message = (cause: unknown) => {
+  const errorMessage = cause instanceof Error ? cause.message : '';
+  if (/new password should be different from the old password/i.test(errorMessage)) {
+    return '新密碼不可與原密碼相同，請設定不同的密碼。';
+  }
+  return errorMessage || '操作未完成，請稍後重試。';
+};
 function PasswordFields() {
   return <><label className="block">設定密碼（至少 8 個字元）<Input className="mt-2 h-12 px-3 md:text-base" name="password" type="password" autoComplete="new-password" minLength={8} required /></label><label className="block">再次輸入密碼<Input className="mt-2 h-12 px-3 md:text-base" name="confirm" type="password" autoComplete="new-password" minLength={8} required /></label></>;
 }
