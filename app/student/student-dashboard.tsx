@@ -75,11 +75,8 @@ export default function StudentDashboard() {
       <div className="dashboard-title">
         <div>
           <h1>我的 OSCE 成績</h1>
-          <p>
-            {record
-              ? `${record.name}，回顧每一次練習，整理下一步的方向。`
-              : '回顧每一次練習，整理下一步的方向。'}
-          </p>
+          {record && <p className="student-record-owner"><span>目前顯示學員：</span><strong>{record.name}</strong></p>}
+          <p>回顧每一次練習，整理下一步的方向。</p>
         </div>
       </div>
       {hospitalError && <p role="alert" className="notice">{hospitalError}</p>}
@@ -122,7 +119,6 @@ export default function StudentDashboard() {
             <span className="identity-pill">手機電話 {maskPhone(record.phone)}</span>
           </div>
           {!record.archived && (!record.profile?.hospital || record.profile.firstOsce === null) ? <section className="data-panel student-profile"><div className="panel-heading"><div><span className="section-label">FIRST LOGIN</span><h2>完成個人資料</h2><p className="form-help">姓名、Email 與手機電話由老師建立，請確認後補齊其餘資料。可搜尋服務醫院、自行填寫機構，或勾選待業中。</p></div></div><form onSubmit={(event) => { event.preventDefault(); saveProfile(event.currentTarget); }}><fieldset disabled={profileBusy || hospitalLoading}><div className="profile-grid"><label>姓名<Input value={record.name} disabled /></label><label>Email<Input value={record.email ?? ''} disabled /></label><label>手機電話<Input value={record.phone ?? ''} disabled /></label><label>護理年資（年）<Input name="nursingYears" type="number" min={0} max={60} required defaultValue={record.profile?.nursingYears ?? ''} /></label><ServiceInstitution hospital={record.profile?.hospital ?? ''} unit={record.profile?.unit ?? ''} serviceKind={record.profile?.serviceKind} hospitals={hospitals} loading={hospitalLoading}/><label>報考科別<NativeSelect name="examSpecialty" required defaultValue={record.profile?.examSpecialty ?? ''}><NativeSelectOption value="">請選擇</NativeSelectOption>{['內科','精神科','兒科','外科','婦產科','麻醉科','家庭科'].map((item) => <NativeSelectOption value={item} key={item}>{item}</NativeSelectOption>)}</NativeSelect></label><label>是否首次報考國家 OSCE<NativeSelect name="firstOsce" required defaultValue={record.profile?.firstOsce === null || record.profile?.firstOsce === undefined ? '' : record.profile.firstOsce ? 'yes' : 'no'}><NativeSelectOption value="">請選擇</NativeSelectOption><NativeSelectOption value="yes">是</NativeSelectOption><NativeSelectOption value="no">否</NativeSelectOption></NativeSelect></label><label>出生年月日<Input name="birthDate" type="date" required defaultValue={record.profile?.birthDate ?? ''} /></label></div><Button className="action" type="submit">{profileBusy ? '儲存中…' : '儲存個人資料'}</Button></fieldset></form></section> : <section className="profile-summary"><span>{record.archived ? '已封存梯次，保留當時背景資料' : '個人資料已完成'}</span><strong>{record.profile?.examSpecialty ? `${record.profile.examSpecialty}專科護理師` : '背景資料未完整登錄'}</strong><p>{record.profile?.hospital || '未登錄醫院'} · {record.profile?.unit || '未登錄單位'} · 護理年資 {record.profile?.nursingYears ?? '未登錄'} 年</p></section>}
-          <StudentSurveys key={record.id} studentId={record.id} />
           {!record.published ? (
             <section className="empty-panel">
               <h2>本梯次成績尚未公布</h2>
@@ -262,6 +258,7 @@ export default function StudentDashboard() {
               </p>
             </>
           )}
+          <StudentSurveys key={record.id} studentId={record.id} />
         </>
       )}
     </>

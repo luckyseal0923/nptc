@@ -86,3 +86,6 @@
 .workshop-control-card .create-workshop-button{height:48px;min-height:48px!important}
 .workshop-control-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}.workshop-control-actions .action{width:100%;margin:0}
 @media(max-width:680px){.workshop-control-card{align-items:stretch}}
+.student-record-owner{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;width:fit-content;max-width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:8px;background:white}
+.student-record-owner span{font-size:14px;color:var(--muted)}
+.student-record-owner strong{font-size:22px;font-weight:700;color:var(--primary);overflow-wrap:anywhere}
