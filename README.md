@@ -1,18 +1,18 @@
 # 為國考而訓：React／Vite 前端與 Supabase
 
-前端是 React＋Vite 靜態網站，建置結果在 dist/。資料庫讀寫透過 Supabase RPC，學員首次啟用由 Edge Function 處理。本文以資料庫版本 2026100701 為準。
+前端是 React＋Vite 靜態網站，建置結果在 dist/。資料庫讀寫透過 Supabase RPC，學員首次啟用由 Edge Function 處理。OSCE 基礎資料庫版本為 2026100701；量表功能另有下列版本要求。
 
 正式網站：[nptc-wfh.zeabur.app](https://nptc-wfh.zeabur.app/)。老師使用 [/teacher/](https://nptc-wfh.zeabur.app/teacher/)，學員使用 [/student/](https://nptc-wfh.zeabur.app/student/)。正式 Auth 回跳設定以 backend-password-login.md 的四個路徑為準。
 
-## 線上量表（功能分支，本機已驗證）
+## 線上量表（main）
 
-最新修改：選單「量表管理庫」內分為「量表庫」與「發布管理」，點選 OSCE 梯次可展開發布內容；學習分析儀表板增加學員量表分數與同版量表歷次趨勢。新增量表入口維持移除，學員端不公布問卷分數。
+量表管理庫分為量表庫與發布管理，可依 OSCE 梯次加入、開關與分享獨立問卷。提供短網址與 QR PNG 下載；學員端只公告是否完成，不公布分數。老師可在學習分析儀表板查看同版量表的分數與趨勢。
 
-發布管理的「加入量表」改為原地清單；問卷可刪除，已有作答時需顯示影響筆數並重新驗證目前管理員的 Email 與密碼。相關 SQL 僅準備來源，未在正式環境執行。
+量表庫含 DTI-SK 14 題、VPIRS-E 25 題與學習滿意度 15 題。VPIRS-E 等待正式規則後才計分；滿意度保存原始回覆、不提供合成總分。量表內容與施測限制見 [量表說明](docs/surveys.md)。
 
-2026-10-29 完成型別檢查、69 項自動化測試、正式模式建置與本機瀏覽器流程／手機排版檢查。完整結果與限制見 [本次驗證紀錄](docs/reviews/2026-10-29-surveys-final-validation.md)。變更交付至 `codex/dti-sk-surveys` 功能分支，正式資料庫與網站未更新。操作及四份 SQL 升級順序見 [量表功能說明](docs/surveys.md)。
+現行量表功能需要資料庫 **2026103001**；OSCE 基礎功能仍以 2026100701 為最低版本。新環境須依序安裝量表各段升級，既有 2026102905 環境只執行 `supabase/upgrade-review-hardening.sql`。GitHub 發布不會自行執行 SQL 或更新 Edge Function。部署與驗證界線見 [本次修正說明](docs/review-hardening.md)。
 
-執行 `pnpm dev:demo` 可使用示範帳號試用，資料僅存瀏覽器。DTI-SK 持續標示「翻譯初稿，未經驗證」；程式驗證不代表量表本身已完成驗證。
+執行 `pnpm dev:demo` 使用示範帳號；資料僅存瀏覽器，無須修改 DEMO_MODE。翻譯初稿及計分待確認的標註持續保留，程式驗證不代表量表本身已完成驗證。
 
 ## 登入與帳號
 
@@ -108,11 +108,11 @@ nptc_private 資料表啟用 RLS，anon／authenticated 沒有直接資料表權
 
 scripts/sync-hospitals.mjs 擷取官方公開名冊並保留 public/data/accredited-hospitals.json 快取。pnpm build:sql 依快取重建 SQL 種子；新版前端與後端都使用已安裝的 nptc_private.hospital_directory，避免兩套名單不同步。
 
-更新快取或每日前端建置不會自動改正式資料庫名冊。要更新正式清單，重新產生 SQL，檢閱差異並執行完整現行升級。下載失敗保留快取，不能宣稱清單已刷新。後端拒絕不在清單的自由文字；既有歷史院名保留。正式資料庫的實際清單版本取決於最後一次 SQL 升級所使用的快取。
+更新快取或每日前端建置不會自動改正式資料庫名冊。要更新正式清單，應產生並檢閱專用的清單更新 SQL；已安裝 2026103001 的環境不可重跑基礎升級，以免覆蓋新版刪除保護。下載失敗保留快取，不能宣稱清單已刷新。後端拒絕不在清單的自由文字；既有歷史院名保留。正式資料庫的實際清單版本取決於最後一次 SQL 升級所使用的快取。
 
 ## 展示模式
 
-lib/demo.ts 的 DEMO_MODE 預設 false。可改為 true，在瀏覽器 localStorage 使用 teacher／demo1234 或 student／demo1234；只用於展示與離線測試，不存正式資料。展示模式遵守逐題公布、名冊鎖定、題目版本與建立重試等主要資料規則；不模擬真實 Auth 信箱確認、SMTP、系統管理者、封存或永久刪除。醫院名冊仍取自網站提供的本機快取資產。
+使用 `pnpm dev:demo` 啟動本機展示模式；正式 build 不啟用展示資料。老師 teacher／demo1234，學員 student-demo@example.test／demo1234。只用於示範與離線測試，不存正式資料；不模擬真實 Auth、SMTP、系統管理者或正式永久刪除。
 
 ## 相關檔案
 
@@ -122,3 +122,7 @@ lib/demo.ts 的 DEMO_MODE 預設 false。可改為 true，在瀏覽器 localStor
 - backend-password-login.md：後臺登入設定與驗收。
 
 官方 API：[更新 Email／密碼](https://supabase.com/docs/reference/javascript/auth-updateuser)、[Edge 個別函式驗證設定](https://supabase.com/docs/guides/functions/function-configuration)。
+
+## 金鑰與機密檢查
+
+`pnpm check:secrets` 掃描 Git 追蹤內容；提交前可加 `node scripts/check-secrets.mjs --staged`。`pnpm check:key` 檢查公開 JWT 到期，`pnpm check:api` 必須以錯誤 code 區分權限拒絕與金鑰故障。更新程序見 [金鑰更新指引](docs/key-renewal.md)。

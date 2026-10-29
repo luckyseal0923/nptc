@@ -2,7 +2,7 @@ import type { SurveyAssignment, SurveyDefinition, SurveyScores, SurveyAnswer } f
 
 export type SurveyAnalysisWorkshop = { id: string; name: string; archived_at?: string | null };
 export type SurveyAnalysisStudent = { id: string; workshop_id: string; name: string; identity: string };
-export type SurveyAnalysisResponse = { assignment_id: string; student_id: string; identity: string; submitted_at: string; answers: SurveyAnswer[]; scores: SurveyScores };
+export type SurveyAnalysisResponse = { assignment_id: string; student_id: string; identity: string; submitted_at: string; answers?: SurveyAnswer[]; scores: SurveyScores };
 export type SurveyAnalysisData = { includesArchived: boolean; workshops: SurveyAnalysisWorkshop[]; students: SurveyAnalysisStudent[]; assignments: SurveyAssignment[]; responses: SurveyAnalysisResponse[] };
 export type SurveyPerson = { identity: string; names: string; studentIds: string[]; workshopIds: string[] };
 export type SurveyTrendPoint = { id: string; label: string; date: string; workshop: string; value: number | null; count: number };

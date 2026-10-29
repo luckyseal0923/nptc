@@ -52,6 +52,10 @@ test('static short-link landing page exposes questionnaire metadata before JavaS
     assert.ok(q.includes('property="og:title" content="問卷填寫｜為國考而訓 NPTC"'));
     assert.ok(q.includes('請使用學員帳號與密碼登入'));
     assert.ok(q.includes('src="/nptc/assets/app.js"'), 'keep subpath build asset URLs');
+    assert.ok(q.includes('http-equiv="Content-Security-Policy"'));
+    const metaPolicy=q.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)[1];
+    assert.ok(metaPolicy.includes("script-src 'self'"));assert.ok(!metaPolicy.includes('frame-ancestors'),'frame-ancestors requires an HTTP header');
+    const headers=await readFile(join(dir,'dist/_headers'),'utf8');assert.ok(headers.includes('X-Frame-Options: DENY'));assert.ok(headers.includes("frame-ancestors 'none'"));
     assert.ok(!(await readFile(join(dir, 'dist/student/index.html'), 'utf8')).includes('property="og:title"'));
   } finally {
     assert.ok(basename(dir).startsWith('nptc-short-links-'));

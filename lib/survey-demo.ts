@@ -34,7 +34,14 @@ export function demoSurveyRpc(name: string, args: Record<string, unknown>, ctx: 
   const workshopId = String(args.requested_workshop ?? body.workshopId ?? '');
   const requireWorkshop = (id: string, write = false) => { const workshop = ctx.workshops.find(w => w.id === id); if (!workshop || write && workshop.archived_at) throw new Error('找不到可修改的梯次，或梯次已封存。'); return workshop; };
   if (name === 'nptc_survey_library') { teacher(); return { instruments: data.library }; }
-  if (name === 'nptc_survey_analysis') {
+  if (name === 'nptc_survey_analysis_workshops') { teacher(); return { includesArchived: false, workshops: ctx.workshops.filter(w => !w.archived_at) }; }
+  if (name === 'nptc_survey_response_detail') {
+    teacher();
+    const a = data.assignments.find(a => a.id === args.requested_assignment); if (!a) throw new Error('找不到問卷。'); requireWorkshop(a.workshop_id);
+    const r = data.responses.find(r => r.assignment_id === a.id && r.student_id === args.requested_student); if (!r) throw new Error('找不到這筆作答。');
+    return { ...r, identity: `email:${r.userEmail.trim().toLowerCase()}` };
+  }
+  if (name === 'nptc_survey_analysis' || name === 'nptc_survey_analysis_summary') {
     teacher();
     const requested = args.requested_workshop ? String(args.requested_workshop) : null;
     if (requested) requireWorkshop(requested);
@@ -43,7 +50,7 @@ export function demoSurveyRpc(name: string, args: Record<string, unknown>, ctx: 
     const assignments = data.assignments.filter(a => ids.has(a.workshop_id));
     const students = ctx.students.filter(s => ids.has(s.workshop_id)).map(s => ({ id: s.id, workshop_id: s.workshop_id, name: s.name, identity: `email:${s.email.trim().toLowerCase()}` }));
     const responses = data.responses.filter(r => assignments.some(a => a.id === r.assignment_id)).map(r => ({ assignment_id: r.assignment_id, student_id: r.student_id, identity: `email:${r.userEmail.trim().toLowerCase()}`, submitted_at: r.submitted_at, answers: r.answers, scores: r.scores }));
-    return { includesArchived: false, workshops, assignments, students, responses };
+    return { includesArchived: false, workshops, assignments, students, responses: name === 'nptc_survey_analysis_summary' ? responses.map(({ answers: _answers, ...r }) => r) : responses };
   }
   if (name === 'nptc_survey_library_save') throw new Error('目前暫不提供新增或修訂量表，請使用量表庫中的既有內容。');
   if (name === 'nptc_survey_delete_info' || name === 'nptc_survey_delete') {

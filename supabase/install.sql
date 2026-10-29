@@ -1338,6 +1338,14 @@ commit;
 -- 新安裝使用 install.sql；請整份執行，可重跑。醫院種子由 scripts/build-supabase.mjs 產生。
 begin;
 do $$ begin
+ if to_regclass('nptc_private.schema_migrations') is not null then
+  if exists(select 1 from nptc_private.schema_migrations where version>=2026103001) then
+   raise exception '已安裝新版刪除保護，不可重跑基礎升級；請使用 upgrade-review-hardening.sql 或後續專用升級。';
+  end if;
+ end if;
+end;$$;
+
+do $$ begin
  if to_regprocedure('nptc_private.student_identity()') is null
  or to_regprocedure('nptc_private.require_fresh_admin_password()') is null
  or not exists(select 1 from information_schema.columns where table_schema='nptc_private' and table_name='station_grades' and column_name='domain_scores') then

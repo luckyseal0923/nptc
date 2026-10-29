@@ -13,7 +13,10 @@
     "build:surveys": "node scripts/build-surveys.mjs",
     "typecheck": "tsc --noEmit --incremental false && tsc -p tsconfig.edge.json --noEmit",
     "test": "node scripts/test.mjs",
-    "check": "pnpm typecheck && pnpm test",
+    "check": "pnpm check:secrets && pnpm typecheck && pnpm test",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:key": "node scripts/check-public-key.mjs",
+    "check:api": "node scripts/check-supabase.mjs",
     "start": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -38,7 +41,7 @@
     "jsqr": "^1.4.0",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
-    "vite": "8.0.13"
+    "vite": "8.1.6"
   },
   "type": "module"
 }

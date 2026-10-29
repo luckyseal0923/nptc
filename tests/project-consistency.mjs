@@ -161,7 +161,7 @@ await test('current installation and populated upgrade preserve permissions and 
   });
   await t.test('all legacy migration replays stop instead of weakening permissions',async()=>{
    await owner();
-   for(const file of readdirSync('supabase').filter(f=>f==='setup.sql'||(f.startsWith('upgrade-')&&f!=='upgrade-project-consistency.sql'&&f!=='upgrade-surveys.sql'&&f!=='upgrade-survey-library.sql'&&f!=='upgrade-survey-analysis.sql'&&f!=='upgrade-survey-deletion.sql'&&f!=='upgrade-survey-catalog.sql'))){
+   for(const file of readdirSync('supabase').filter(f=>f==='setup.sql'||(f.startsWith('upgrade-')&&f!=='upgrade-project-consistency.sql'&&f!=='upgrade-surveys.sql'&&f!=='upgrade-survey-library.sql'&&f!=='upgrade-survey-analysis.sql'&&f!=='upgrade-survey-deletion.sql'&&f!=='upgrade-survey-catalog.sql'&&f!=='upgrade-review-hardening.sql'))){
     await assert.rejects(()=>db.exec(readFileSync(`supabase/${file}`,'utf8')),/不可重跑舊版/);await db.exec('rollback');
    }
    await db.exec(readFileSync('supabase/repair-student-phone-write.sql','utf8'));

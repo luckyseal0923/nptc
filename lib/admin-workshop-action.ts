@@ -6,6 +6,7 @@ export async function adminWorkshopAction(
   workshop: { id: string; name: string },
   email: string,
   password: string,
+  deletion?: { fingerprint: string; acknowledgeDataLoss: boolean },
 ): Promise<void> {
   const { data: current, error: currentError } = await supabase.auth.getUser();
   if (currentError || !current.user) throw new Error('登入狀態已失效，請重新登入後臺。');
@@ -13,27 +14,30 @@ export async function adminWorkshopAction(
     throw new Error('請輸入目前登入的系統管理者帳號。');
   }
   const verification = createClient(import.meta.env.SUPABASE_URL, import.meta.env.SUPABASE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'nptc-workshop-confirm' },
   });
-  const { data, error } = await verification.auth.signInWithPassword({ email: email.trim(), password });
-  if (error || !data.session || data.user.id !== current.user.id) {
-    throw new Error('帳號或密碼驗證失敗，請重新確認。');
-  }
-  const rpcName = action === 'archive' ? 'nptc_set_workshop_archived' : 'nptc_delete_archived_workshop';
-  const body = action === 'archive'
-    ? { workshopId: workshop.id, archived: true }
-    : { workshopId: workshop.id, name: workshop.name };
-  const response = await fetch(`${import.meta.env.SUPABASE_URL}/rest/v1/rpc/${rpcName}`, {
-    method: 'POST',
-    headers: {
-      apikey: import.meta.env.SUPABASE_KEY,
-      Authorization: `Bearer ${data.session.access_token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ body }),
-  });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    throw new Error(typeof result.message === 'string' ? result.message : '操作失敗，請稍後再試。');
-  }
+  try {
+    const { data, error } = await verification.auth.signInWithPassword({ email: email.trim(), password });
+    if (error || !data.session || data.user.id !== current.user.id) {
+      throw new Error('帳號或密碼驗證失敗，請重新確認。');
+    }
+    const rpcName = action === 'archive' ? 'nptc_set_workshop_archived' : 'nptc_delete_archived_workshop';
+    const body = action === 'archive'
+      ? { workshopId: workshop.id, archived: true }
+      : { workshopId: workshop.id, name: workshop.name, ...deletion };
+    const response = await fetch(`${import.meta.env.SUPABASE_URL}/rest/v1/rpc/${rpcName}`, {
+      method: 'POST',
+      headers: {
+        apikey: import.meta.env.SUPABASE_KEY,
+        Authorization: `Bearer ${data.session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ body }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(typeof result.message === 'string' ? result.message : '操作失敗，請稍後再試。');
+    }
+  } finally { await verification.auth.signOut({ scope: 'local' }).catch(() => undefined); }
 }

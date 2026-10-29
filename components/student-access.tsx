@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { type Hospital } from '@/components/hospital-picker';
 import { studentActivationError, studentAccountExists } from '@/lib/student-access-errors';
+import { studentReturnUrl } from '@/lib/student-return';
 
 type Student = { name: string; email: string; phone: string; nursingYears: number | null; serviceKind?: string; hospital: string | null; unit: string | null; examSpecialty: string | null; firstOsce: boolean | null; birthDate: string | null };
 export type Onboarding = { stage: 'unclaimed' | 'profile' | 'active'; student?: Student };
-const redirect = () => new URL(`${import.meta.env.BASE_URL}student/`, location.origin).href;
+const redirect = (reset = false) => studentReturnUrl(location.origin, import.meta.env.BASE_URL, location.search, reset);
 const message = (cause: unknown) => {
   const errorMessage = cause instanceof Error ? cause.message : '';
   if (/new password should be different from the old password/i.test(errorMessage)) {
@@ -55,7 +56,7 @@ export function StudentLogin() {
         const login = await supabase.auth.signInWithPassword({ email, password });
         if (login.error) { setMode('login'); setSent('帳號已建立，請使用剛設定的密碼登入。'); }
       } else if (mode === 'reset') {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirect()}?reset=1` });
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: redirect(true) });
         if (error) throw new Error('重設密碼信件暫時無法寄送，請稍後重試或聯絡管理員。');
         setSent('若此 Email 可用於重設密碼，您將收到重設連結，請至信箱查看。');
       } else {

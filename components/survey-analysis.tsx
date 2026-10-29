@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { BarChart3, RefreshCw } from 'lucide-react';
 import { rpc } from '@/lib/supabase';
 import { formatSurveyTime } from '@/lib/surveys';
-import { dimensionLabel, metricRange, metricValue, orderedAssignments, scaleKey, surveyPeople, surveyTrend, type SurveyAnalysisData, type SurveyTrendPoint } from '@/lib/survey-analysis';
+import { dimensionLabel, metricRange, metricValue, orderedAssignments, scaleKey, surveyPeople, surveyTrend, type SurveyAnalysisData, type SurveyAnalysisResponse, type SurveyTrendPoint } from '@/lib/survey-analysis';
+import { requireSurveySchema } from '@/lib/survey-schema';
 import '@/app/learning-analysis.css';
 
 const scoreText = (value: number | null) => value === null ? '—' : Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -10,16 +11,35 @@ const dateText = (value: string) => value && Number.isFinite(Date.parse(value)) 
 
 export default function SurveyAnalysis({ currentWorkshopId }: { currentWorkshopId?: string }) {
   const [data, setData] = useState<SurveyAnalysisData | null>(null), [error, setError] = useState(''), [reload, setReload] = useState(0);
-  const [workshopId, setWorkshopId] = useState(currentWorkshopId ?? 'all'), [selectedScale, setSelectedScale] = useState('');
+  const [workshopId, setWorkshopId] = useState(currentWorkshopId ?? ''), [selectedScale, setSelectedScale] = useState('');
+  const [workshopsReady, setWorkshopsReady] = useState(false);
   const [personId, setPersonId] = useState('all'), [query, setQuery] = useState(''), [metric, setMetric] = useState('total');
   const [detail, setDetail] = useState<{ assignmentId: string; studentId: string } | null>(null);
+  const [answerDetail, setAnswerDetail] = useState<SurveyAnalysisResponse | null>(null), [detailError, setDetailError] = useState('');
   useEffect(() => {
-    const abort = new AbortController(); setData(null); setError('');
-    rpc<SurveyAnalysisData>('nptc_survey_analysis', { requested_workshop: null }, abort.signal)
-      .then(result => { if (!abort.signal.aborted) setData(result); })
+    const abort = new AbortController(); setWorkshopsReady(false); setData(null); setError('');
+    requireSurveySchema(abort.signal).then(() => rpc<Pick<SurveyAnalysisData, 'workshops'>>('nptc_survey_analysis_workshops', {}, abort.signal))
+      .then(result => { if (!abort.signal.aborted) { setWorkshopId(current => current === 'all' || result.workshops.some(w => w.id === current) ? current : result.workshops[0]?.id ?? 'all'); setWorkshopsReady(true); } })
       .catch(cause => { if (!abort.signal.aborted) setError(cause.message); });
     return () => abort.abort();
   }, [reload]);
+  useEffect(() => {
+    if (!workshopsReady) return;
+    const abort = new AbortController(); setData(null); setError('');
+    rpc<SurveyAnalysisData>('nptc_survey_analysis_summary', { requested_workshop: workshopId === 'all' ? null : workshopId }, abort.signal)
+      .then(result => { if (!abort.signal.aborted) setData(result); })
+      .catch(cause => { if (!abort.signal.aborted) setError(cause.message); });
+    return () => abort.abort();
+  }, [reload, workshopId, workshopsReady]);
+  useEffect(() => {
+    setAnswerDetail(null); setDetailError('');
+    if (!detail) return;
+    const abort = new AbortController();
+    rpc<SurveyAnalysisResponse>('nptc_survey_response_detail', { requested_assignment: detail.assignmentId, requested_student: detail.studentId }, abort.signal)
+      .then(result => { if (!abort.signal.aborted) setAnswerDetail(result); })
+      .catch(cause => { if (!abort.signal.aborted) setDetailError(cause.message); });
+    return () => abort.abort();
+  }, [detail]);
   const effectiveWorkshop = data?.workshops.some(w => w.id === workshopId) ? workshopId : 'all';
   const scopeAssignments = useMemo(() => data?.assignments.filter(a => a.status !== 'draft' && (effectiveWorkshop === 'all' || a.workshop_id === effectiveWorkshop)) ?? [], [data, effectiveWorkshop]);
   const scales = [...new Map(scopeAssignments.map(a => [scaleKey(a), { key: scaleKey(a), title: a.definition.title, version: a.scale_version, definition: a.definition }])).values()];
@@ -40,7 +60,7 @@ export default function SurveyAnalysis({ currentWorkshopId }: { currentWorkshopI
   const responses = data?.responses.filter(r => assignmentIds.has(r.assignment_id) && identities.has(r.identity)) ?? [];
   const values = responses.map(r => metricValue(r.scores, activeMetric)).filter((n): n is number => n !== null);
   const expected = assignments.reduce((sum, a) => sum + displayedPeople.filter(p => p.workshopIds.includes(a.workshop_id)).length, 0);
-  const detailResponse = detail ? responses.find(r => r.assignment_id === detail.assignmentId && r.student_id === detail.studentId) : undefined;
+  const detailResponse = detail && answerDetail?.assignment_id === detail.assignmentId && answerDetail.student_id === detail.studentId && responses.some(r => r.assignment_id === detail.assignmentId && r.student_id === detail.studentId) ? answerDetail : undefined;
   const detailAssignment = detailResponse ? assignments.find(a => a.id === detailResponse.assignment_id) : undefined;
   const detailPerson = detailResponse ? displayedPeople.find(p => p.identity === detailResponse.identity) : undefined;
   const resetDetails = () => { setPersonId('all'); setDetail(null); };
@@ -68,7 +88,8 @@ export default function SurveyAnalysis({ currentWorkshopId }: { currentWorkshopI
         const r = data.responses.find(r => r.assignment_id === a.id && r.identity === p.identity), value = r ? metricValue(r.scores, activeMetric) : null;
         return <td key={a.id}>{r ? <><button className="survey-score-button" onClick={() => { setPersonId(p.identity); setDetail({ assignmentId: a.id, studentId: r.student_id }); }}>{noScores ? '查看原答' : value === null ? '已完成' : `${scoreText(value)} 分`}</button><small>填寫：{formatSurveyTime(r.submitted_at)}</small></> : <span className="survey-muted">尚未填寫</span>}</td>;
       })}</tr>)}</tbody></table></div>{!displayedPeople.length && <p className="analysis-empty">目前沒有符合條件的學員。</p>}</section>
-      {detailResponse && detailAssignment && <section className="analysis-panel survey-answer-detail" aria-label="逐題量表作答"><div className="analysis-panel-heading"><div><h2>{detailPerson?.names}｜逐題作答</h2><p>{detailAssignment.definition.title} · {detailAssignment.note || '未填備註'} · {formatSurveyTime(detailResponse.submitted_at)}</p></div><button className="analysis-link" onClick={() => setDetail(null)}>關閉明細</button></div><div className="analysis-table-scroll"><table><thead><tr><th>題號</th><th>題目內容</th><th>原始作答</th><th>換算得分</th></tr></thead><tbody>{detailAssignment.definition.items.map((q, i) => <tr key={i}><th scope="row">{i + 1}</th><td className="survey-answer-statement">{q.text || <><p>左：{q.left}</p><p>右：{q.right}</p></>}</td><td>{detailResponse.answers[i] ?? '—'}</td><td>{noScores ? scoringLabel : detailResponse.scores.itemScores[i] ?? '—'}</td></tr>)}</tbody></table></div><p className="analysis-note">{noScores ? scoringLabel : `總分：${scoreText(detailResponse.scores.total)}`}。資料以該次問卷保存的題目與計分版本呈現。</p></section>}
+      {detail && !detailResponse && <p role={detailError ? 'alert' : 'status'}>{detailError || '正在讀取此筆原始作答…'}</p>}
+      {detailResponse && detailAssignment && <section className="analysis-panel survey-answer-detail" aria-label="逐題量表作答"><div className="analysis-panel-heading"><div><h2>{detailPerson?.names}｜逐題作答</h2><p>{detailAssignment.definition.title} · {detailAssignment.note || '未填備註'} · {formatSurveyTime(detailResponse.submitted_at)}</p></div><button className="analysis-link" onClick={() => setDetail(null)}>關閉明細</button></div><div className="analysis-table-scroll"><table><thead><tr><th>題號</th><th>題目內容</th><th>原始作答</th><th>換算得分</th></tr></thead><tbody>{detailAssignment.definition.items.map((q, i) => <tr key={i}><th scope="row">{i + 1}</th><td className="survey-answer-statement">{q.text || <><p>左：{q.left}</p><p>右：{q.right}</p></>}</td><td>{detailResponse.answers?.[i] ?? '—'}</td><td>{noScores ? scoringLabel : detailResponse.scores.itemScores[i] ?? '—'}</td></tr>)}</tbody></table></div><p className="analysis-note">{noScores ? scoringLabel : `總分：${scoreText(detailResponse.scores.total)}`}。資料以該次問卷保存的題目與計分版本呈現。</p></section>}
     </>}
   </div>;
 }

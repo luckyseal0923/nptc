@@ -4,13 +4,15 @@ import { rpc } from '@/lib/supabase';
 import { appUrl } from '@/lib/routes';
 import { availabilityLabel, formatSurveyTime, surveyLink, validateSurveyResponse, type SurveyAnswer, type SurveyAssignment, type SurveySummary } from '@/lib/surveys';
 import '@/app/surveys.css';
+import { useUnsavedSurvey } from '@/lib/use-unsaved-survey';
+import { requireSurveySchema } from '@/lib/survey-schema';
 
 export function StudentSurveys({ studentId }: { studentId: string }) {
   const [assignments, setAssignments] = useState<SurveySummary[] | null>(null);
   const [error, setError] = useState(''), [reload, setReload] = useState(0);
   useEffect(() => {
     const abort = new AbortController(); setError('');
-    rpc<{ assignments: SurveySummary[] }>('nptc_survey_student_data', { requested_student: studentId }, abort.signal)
+    requireSurveySchema(abort.signal).then(() => rpc<{ assignments: SurveySummary[] }>('nptc_survey_student_data', { requested_student: studentId }, abort.signal))
       .then(data => setAssignments(data.assignments)).catch(cause => { if (!abort.signal.aborted) setError(cause.message); });
     return () => abort.abort();
   }, [studentId, reload]);
@@ -28,7 +30,7 @@ export function SurveyLinkPage({ assignmentId }: { assignmentId: string }) {
   const [error, setError] = useState(''), [receipt, setReceipt] = useState(''), [reload, setReload] = useState(0);
   useEffect(() => {
     const abort = new AbortController(); setError('');
-    rpc<{ assignment: SurveyAssignment; workshopName: string }>('nptc_survey_form', { requested_assignment: assignmentId }, abort.signal)
+    requireSurveySchema(abort.signal).then(() => rpc<{ assignment: SurveyAssignment; workshopName: string }>('nptc_survey_form', { requested_assignment: assignmentId }, abort.signal))
       .then(setData).catch(cause => { if (!abort.signal.aborted) setError(cause.message); });
     return () => abort.abort();
   }, [assignmentId, reload]);
@@ -41,6 +43,7 @@ function SurveyForm({ assignment, onComplete }: { assignment: SurveyAssignment; 
   const [answers, setAnswers] = useState<SurveyAnswer[]>(() => assignment.definition.items.map(() => null));
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [uncertain, setUncertain] = useState(false);
   const pending = useRef<{ id: string; answers: string } | null>(null);
+  useUnsavedSurvey(answers.some(value => value !== null && value !== ''));
   const min = assignment.definition.minScore ?? 1, max = assignment.definition.maxScore ?? 6;
   const options = Array.from({ length: max - min + 1 }, (_, i) => min + i);
   async function submit() {

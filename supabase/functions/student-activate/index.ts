@@ -3,6 +3,25 @@ import { createClient } from 'npm:@supabase/supabase-js@2.115.0';
 // 此檔僅在 Supabase Edge Runtime 執行；service role 不可放入前端。
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const reply = (status: number, message: string) => new Response(JSON.stringify({ message }), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+async function boundedBody(request: Request): Promise<string> {
+ const declared = request.headers.get('content-length');
+ if (declared && (!/^\d+$/.test(declared) || Number(declared) > 4096)) throw new RangeError('body too large');
+ if (!request.body) return '';
+ const reader = request.body.getReader();
+ const chunks: Uint8Array[] = []; let size = 0;
+ try {
+  for (;;) {
+   const { done, value } = await reader.read();
+   if (done) break;
+   size += value.byteLength;
+   if (size > 4096) { await reader.cancel(); throw new RangeError('body too large'); }
+   chunks.push(value);
+  }
+ } finally { reader.releaseLock(); }
+ const bytes = new Uint8Array(size); let offset = 0;
+ for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+ return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
 // 自架環境的 Kong API key 與資料庫 JWT 驗證分開；沿用 Kong key，
 // Authorization 使用共享 JWT_SECRET 簽出的短效服務權杖，不回傳給瀏覽器。
 async function serviceAuthorization() {
@@ -19,8 +38,7 @@ Deno.serve(async (request: Request) => {
  if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
  if (request.method !== 'POST') return reply(405, '不支援的操作。');
  try {
-  const raw = await request.text();
-  if (raw.length > 4096) return reply(400, '資料格式不正確。');
+  const raw = await boundedBody(request);
   const body = JSON.parse(raw);
   if (typeof body.name !== 'string' || body.name.length > 100 || typeof body.email !== 'string' || body.email.length > 254 ||
    typeof body.phone !== 'string' || !/^09\d{8}$/.test(body.phone) ||
@@ -35,5 +53,5 @@ Deno.serve(async (request: Request) => {
   const { error: createError } = await admin.auth.admin.createUser({ email: data.email, password: body.password, email_confirm: true });
   if (createError) return reply(409, '帳號建立未完成。若帳號已存在請直接登入，否則請稍後重試或聯絡管理員。');
   return reply(200, '帳號已建立，請登入完成個人資料。');
- } catch { return reply(400, '啟用未完成，請確認資料或聯絡管理員。'); }
+ } catch (error) { return error instanceof RangeError ? reply(413, '請求內容過大，請確認輸入資料。') : reply(400, '啟用未完成，請確認資料或聯絡管理員。'); }
 });

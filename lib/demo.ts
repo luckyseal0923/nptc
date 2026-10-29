@@ -97,7 +97,7 @@ async function hospitalDirectory(): Promise<{ hospitals: { name: string; city: s
 export async function demoRpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   const user = requireUser();
   if (name === 'nptc_is_teacher') return (user.role === 'teacher') as T;
-  if (name === 'nptc_schema_version') return REQUIRED_SCHEMA_VERSION as T;
+  if (name === 'nptc_schema_version') return Math.max(REQUIRED_SCHEMA_VERSION, 2026103001) as T;
   if (name === 'nptc_hospital_directory') return await hospitalDirectory() as T;
   if (name === 'nptc_sync_student_email') return { ok: true } as T;
   if (name === 'nptc_is_account_reviewer') return false as T;

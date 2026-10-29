@@ -10,6 +10,7 @@ import { downloadSurveyQr } from '@/lib/survey-qr';
 import { dimensionLabel } from '@/lib/survey-analysis';
 import { downloadSurveyCsv, formatSurveyTime, surveyResponsesCsv, taipeiInput, taipeiToUtc, type SurveyAssignment, type SurveyDefinition, type SurveyExport, type SurveyInstrument, type SurveyScores, type SurveyStatus } from '@/lib/surveys';
 import '@/app/surveys.css';
+import { requireSurveySchema } from '@/lib/survey-schema';
 
 type Workshop = { id: string; name: string; archived_at?: string | null };
 type Data = { assignments: SurveyAssignment[]; students: { id: string; name: string }[]; responses: { assignment_id: string; student_id: string; submitted_at: string; scores: SurveyScores }[] };
@@ -36,7 +37,7 @@ export default function TeacherSurveys({ currentWorkshopId }: { currentWorkshopI
   }, [currentWorkshopId, revision]);
   useEffect(() => {
     const abort = new AbortController(); setLibraryLoading(true);
-    rpc<{ instruments: SurveyInstrument[] }>('nptc_survey_library', {}, abort.signal).then(result => { if (!abort.signal.aborted) setLibrary(result.instruments); })
+    requireSurveySchema(abort.signal).then(() => rpc<{ instruments: SurveyInstrument[] }>('nptc_survey_library', {}, abort.signal)).then(result => { if (!abort.signal.aborted) setLibrary(result.instruments); })
       .catch(cause => { if (!abort.signal.aborted) setError(cause.message); })
       .finally(() => { if (!abort.signal.aborted) setLibraryLoading(false); });
     return () => abort.abort();

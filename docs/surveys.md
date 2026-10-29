@@ -51,13 +51,14 @@ DTI-SK 使用先前確認的 14 題，保留左右敘述及 1–6 量尺，第 1
 
 ## 正式升級安排與目前狀態
 
-本專案正式資料庫已核對完成四段量表升級，無須為本次前端發布重裝。以下保留給尚未安裝的新環境；GitHub 建置不會自行執行 SQL。
+量表各段升級順序如下。已完成的舊段落不必重裝；既有 2026102905 環境只需本次 2026103001 升級。GitHub 建置不會自行執行 SQL。
 
 1. 先依主 README 備份資料並完成既有 NPTC 資料庫。
 2. 安裝完整 `supabase/upgrade-surveys.sql`。
 3. 接著執行完整 `supabase/upgrade-survey-library.sql`。此檔新增量表庫、獨立問卷加入及問卷連結 RPC，移除固定類別限制，保留原始作答與快照。
 4. 接著執行 `supabase/upgrade-survey-analysis.sql`，最後執行 `supabase/upgrade-survey-deletion.sql`。
-5. 使用 `verify-surveys.sql` 與 `verify-survey-library.sql` 唯讀檢查安裝；完成真實帳號與專用測試梯次驗收後，再部署正式前端。
+5. 執行 `supabase/upgrade-survey-catalog.sql`（VPIRS-E、滿意度與混合題型），再執行 `supabase/upgrade-review-hardening.sql`（版本 2026103001、分批分析與整梯次刪除保護）。
+6. 使用 `verify-surveys.sql` 與 `verify-survey-library.sql` 唯讀檢查安裝；完成真實帳號與專用測試梯次驗收後，再部署正式前端。
 
 第二段升級完成後，第一段升級會拒絕單獨重跑，以保護新量表庫流程；之後的重跑使用第二段升級。推送 GitHub 或前端建置不會自動安裝 SQL。示範分數使用下方獨立種子檔，與資料庫安裝分開。
 
