@@ -36,3 +36,5 @@
 ## 後續上線
 
 GitHub 推送位置為 `codex/dti-sk-surveys` 功能分支，不合併 `main`。推送原始碼不會安裝資料庫 SQL；部署前依 `docs/surveys.md` 安裝順序完成資料庫與真實帳號驗收。
+
+功能提交 `2e5ded2` 已成功推送至 `origin/codex/dti-sk-surveys`，Git 遠端回應確認建立分支並設定追蹤。
