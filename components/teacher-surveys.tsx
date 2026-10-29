@@ -5,12 +5,16 @@ import { SurveyAssignDialog } from '@/components/survey-assign-dialog';
 import { DeleteSurveyDialog } from '@/components/delete-survey-dialog';
 import { rpc } from '@/lib/supabase';
 import { appUrl } from '@/lib/routes';
-import { downloadSurveyCsv, formatSurveyTime, surveyLink, surveyResponsesCsv, taipeiInput, taipeiToUtc, type SurveyAssignment, type SurveyExport, type SurveyInstrument, type SurveyScores, type SurveyStatus } from '@/lib/surveys';
+import { shortSurveyPath } from '@/lib/survey-short-link';
+import { downloadSurveyQr } from '@/lib/survey-qr';
+import { dimensionLabel } from '@/lib/survey-analysis';
+import { downloadSurveyCsv, formatSurveyTime, surveyResponsesCsv, taipeiInput, taipeiToUtc, type SurveyAssignment, type SurveyDefinition, type SurveyExport, type SurveyInstrument, type SurveyScores, type SurveyStatus } from '@/lib/surveys';
 import '@/app/surveys.css';
 
 type Workshop = { id: string; name: string; archived_at?: string | null };
 type Data = { assignments: SurveyAssignment[]; students: { id: string; name: string }[]; responses: { assignment_id: string; student_id: string; submitted_at: string; scores: SurveyScores }[] };
-const answerUrl = (id: string) => appUrl('/student/') + surveyLink(id);
+const answerUrl = (id: string) => appUrl(shortSurveyPath(id));
+const itemScoringLabel = (definition: SurveyDefinition, index: number) => definition.scoringStatus === 'unscored' ? '原始回覆，不計分' : definition.scoringStatus === 'pending' ? `${definition.negativeItems?.includes(index + 1) ? '負向敘述；' : ''}計分規則待確認` : definition.reverseItems?.includes(index + 1) ? '反向計分' : '正向計分';
 
 export default function TeacherSurveys({ currentWorkshopId }: { currentWorkshopId?: string }) {
   const [workshops, setWorkshops] = useState<Workshop[]>([]), [selected, setSelected] = useState('');
@@ -70,9 +74,9 @@ export default function TeacherSurveys({ currentWorkshopId }: { currentWorkshopI
       {libraryLoading && <p role="status">正在載入量表庫…</p>}
       {!libraryLoading && library.length === 0 && <p className="empty-panel">量表庫目前尚無可使用的量表。</p>}
       <div className="survey-library-list">{library.filter(i => `${i.definition.title} ${i.version}`.toLowerCase().includes(search.toLowerCase())).map(instrument => <article className="survey-card" key={`${instrument.code}-${instrument.version}`}>
-        <div className="survey-library-title"><div><h3>{instrument.definition.title}</h3><p className="survey-muted">{instrument.definition.items.length} 題 · {instrument.definition.minScore ?? 1}–{instrument.definition.maxScore ?? 6} 分 · {instrument.version}</p></div><Button className="action" disabled={busy || !workshops.some(w => !w.archived_at)} onClick={() => { if (workshop?.archived_at) setSelected(workshops.find(w => !w.archived_at)?.id ?? ''); setAdding({ instrument, requestId: crypto.randomUUID() }); }}>加入梯次</Button></div>
+        <div className="survey-library-title"><div><h3>{instrument.definition.title}</h3><p className="survey-muted">{instrument.definition.items.length} 題 · {instrument.definition.items.some(q => q.type === 'text' || q.type === 'choice') ? '單選與文字回覆' : `${instrument.definition.minScore ?? 1}–${instrument.definition.maxScore ?? 6} 分`} · {instrument.version}</p></div><Button className="action" disabled={busy || !workshops.some(w => !w.archived_at)} onClick={() => { if (workshop?.archived_at) setSelected(workshops.find(w => !w.archived_at)?.id ?? ''); setAdding({ instrument, requestId: crypto.randomUUID() }); }}>加入梯次</Button></div>
         {instrument.definition.notice && <p className="survey-warning">{instrument.definition.notice}</p>}
-        <details className="survey-library-content"><summary>展開量表內容</summary>{instrument.definition.instructions.map(p => <p key={p}>{p}</p>)}<ol>{instrument.definition.items.map((q, i) => <li key={i}>{q.text ? <p>{q.text}</p> : <div className="survey-statements"><p><span>左側敘述</span>{q.left}</p><p><span>右側敘述</span>{q.right}</p></div>}<small className="survey-muted">{instrument.definition.reverseItems?.includes(i + 1) ? '反向計分' : '正向計分'}</small></li>)}</ol></details>
+        <details className="survey-library-content"><summary>展開量表內容</summary>{instrument.definition.instructions.map(p => <p key={p}>{p}</p>)}{!!Object.keys(instrument.definition.dimensions ?? {}).length && <p className="survey-muted">構面：{Object.entries(instrument.definition.dimensions ?? {}).map(([name, items]) => `${dimensionLabel(name)}（${items.length} 題）`).join('、')}</p>}<ol>{instrument.definition.items.map((q, i) => <li key={i}>{q.section && <h4>{q.section}</h4>}{q.text ? <p>{q.text}</p> : <div className="survey-statements"><p><span>左側敘述</span>{q.left}</p><p><span>右側敘述</span>{q.right}</p></div>}{q.options && <p className="survey-muted">選項：{q.options.join('／')}</p>}{q.type === 'text' && <p className="survey-muted">文字意見，{q.required === false ? '選填' : '必填'}</p>}<small className="survey-muted">{itemScoringLabel(instrument.definition,i)}</small></li>)}</ol></details>
         {adding?.instrument === instrument && <form className="survey-add-form" onSubmit={async event => {
           event.preventDefault(); const fields = new FormData(event.currentTarget);
           if (!selected || workshop?.archived_at) { setError('請選擇可發布的 OSCE 梯次。'); return; }
@@ -110,9 +114,16 @@ function WorkshopPublishing({ workshop, revision, busy, onAdd, onWrite, onShare,
 function AssignmentSettings({ assignment: a, count, disabled, onSave, onCopy, onShare, onExport, onDeleted }: { assignment: SurveyAssignment; count: number; disabled: boolean; onSave: (body: Record<string, unknown>) => Promise<boolean>; onCopy: () => void; onShare: () => void; onExport: () => void; onDeleted: () => void }) {
   const [status, setStatus] = useState<SurveyStatus>(a.status === 'draft' ? 'open' : a.status), [error, setError] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [qrBusy, setQrBusy] = useState(false);
+  async function downloadQr() {
+    setQrBusy(true); setError('');
+    try { await downloadSurveyQr(answerUrl(a.id), a.scale_code, a.id); }
+    catch { setError('QR code 下載失敗，請再試一次。'); }
+    finally { setQrBusy(false); }
+  }
   const linkRef = useRef<HTMLInputElement>(null);
   return <article className="survey-card"><div className="survey-card-heading"><span className="survey-badge">{a.status === 'draft' ? '草稿' : a.status === 'open' ? '已發布' : '已關閉'}</span><span className="survey-muted">已完成 {a.submitted_count ?? 0} / {count} 人</span></div><h2>{a.definition.title}</h2>
-    <div className="survey-link-box"><label>學員填答連結<input ref={linkRef} readOnly value={answerUrl(a.id)} onFocus={e => e.currentTarget.select()} /></label><div className="survey-export-actions"><Button type="button" className="action secondary small" onClick={onCopy}>複製連結</Button><Button type="button" className="action secondary small" onClick={onShare}>分享連結</Button><a className="text-link" href={answerUrl(a.id)} target="_blank" rel="noreferrer">開啟問卷 ↗</a></div></div>
+    <div className="survey-link-box"><label>學員填答短網址<input ref={linkRef} readOnly value={answerUrl(a.id)} onFocus={e => e.currentTarget.select()} /></label><div className="survey-export-actions"><Button type="button" className="action secondary small" onClick={onCopy}>複製短網址</Button><Button type="button" className="action secondary small" onClick={onShare}>分享連結</Button><Button type="button" className="action secondary small" disabled={qrBusy} onClick={downloadQr}>{qrBusy ? '正在產生 QR code…' : '下載 QR code'}</Button><a className="text-link" href={answerUrl(a.id)} target="_blank" rel="noreferrer">開啟問卷 ↗</a></div></div>
     <form onSubmit={event => { event.preventDefault(); setError(''); const fields = new FormData(event.currentTarget); try { const opensAt = taipeiToUtc(String(fields.get('opensAt') ?? '')), closesAt = taipeiToUtc(String(fields.get('closesAt') ?? '')); if (opensAt && closesAt && opensAt >= closesAt) throw new Error('截止時間須晚於開放時間。'); void onSave({ id: a.id, revision: a.revision, status, note: String(fields.get('note') ?? ''), opensAt, closesAt }); } catch (cause) { setError((cause as Error).message); } }}>
       <fieldset disabled={disabled} className="survey-settings"><label>備註（僅老師可見）<textarea name="note" maxLength={2000} rows={2} defaultValue={a.note} /></label><label>發布狀態<NativeSelect value={status} onChange={e => setStatus(e.target.value as SurveyStatus)}><NativeSelectOption value="open">開放填答</NativeSelectOption><NativeSelectOption value="closed">關閉填答</NativeSelectOption></NativeSelect></label><label>開放時間（臺灣時間，可留空）<input type="datetime-local" name="opensAt" defaultValue={taipeiInput(a.opens_at)} /></label><label>截止時間（臺灣時間，可留空）<input type="datetime-local" name="closesAt" defaultValue={taipeiInput(a.closes_at)} /></label><Button className="action" type="submit">{a.status === 'draft' ? '儲存並發布' : '儲存設定'}</Button></fieldset>
       {error && <p role="alert" className="notice error">{error}</p>}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { rpc } from '@/lib/supabase';
 import { appUrl } from '@/lib/routes';
-import { availabilityLabel, formatSurveyTime, surveyLink, validateSurveyAnswers, type SurveyAssignment, type SurveySummary } from '@/lib/surveys';
+import { availabilityLabel, formatSurveyTime, surveyLink, validateSurveyResponse, type SurveyAnswer, type SurveyAssignment, type SurveySummary } from '@/lib/surveys';
 import '@/app/surveys.css';
 
 export function StudentSurveys({ studentId }: { studentId: string }) {
@@ -38,7 +38,7 @@ export function SurveyLinkPage({ assignmentId }: { assignmentId: string }) {
 }
 
 function SurveyForm({ assignment, onComplete }: { assignment: SurveyAssignment; onComplete: (time: string) => void }) {
-  const [answers, setAnswers] = useState<(number | null)[]>(() => assignment.definition.items.map(() => null));
+  const [answers, setAnswers] = useState<SurveyAnswer[]>(() => assignment.definition.items.map(() => null));
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [uncertain, setUncertain] = useState(false);
   const pending = useRef<{ id: string; answers: string } | null>(null);
   const min = assignment.definition.minScore ?? 1, max = assignment.definition.maxScore ?? 6;
@@ -46,7 +46,7 @@ function SurveyForm({ assignment, onComplete }: { assignment: SurveyAssignment; 
   async function submit() {
     setError('');
     try {
-      validateSurveyAnswers(answers, assignment.definition.items.length, min, max);
+      validateSurveyResponse(answers, assignment.definition);
       const serialized = JSON.stringify(answers);
       if (!pending.current) pending.current = { id: crypto.randomUUID(), answers: serialized };
       if (pending.current.answers !== serialized) throw new Error('正在確認上一筆提交，請重試原作答。');
@@ -61,12 +61,13 @@ function SurveyForm({ assignment, onComplete }: { assignment: SurveyAssignment; 
   return <form className="survey-form" onSubmit={event => { event.preventDefault(); void submit(); }}>
     <header><h2>{assignment.definition.title}</h2>{assignment.definition.notice && <p className="survey-warning">{assignment.definition.notice}</p>}</header>
     <div className="survey-instructions">{assignment.definition.instructions.map(p => <p key={p}>{p}</p>)}<p>每題選擇一個答案。繳交後保留原始作答，不提供修改。</p></div>
-    <fieldset disabled={busy || uncertain} className="survey-items">{assignment.definition.items.map((item, i) => <fieldset className="survey-question" key={i}><legend>第 {i + 1} 題</legend>
+    <fieldset disabled={busy || uncertain} className="survey-items">{assignment.definition.items.map((item, i) => <fieldset className="survey-question" key={i}><legend>第 {i + 1} 題{item.required === false ? '（選填）' : ''}</legend>
+      {item.section && <h3 className="survey-domain-heading">{item.section}</h3>}
       {item.text ? <p className="survey-statement-text">{item.text}</p> : <div className="survey-statements"><p><span>左側敘述（{min}）</span>{item.left}</p><p><span>右側敘述（{max}）</span>{item.right}</p></div>}
-      <div className="survey-options" style={{ gridTemplateColumns: `repeat(${Math.min(options.length, 6)}, minmax(0, 1fr))` }} role="radiogroup" aria-label={`第 ${i + 1} 題，${min} 至 ${max} 單選`}>{options.map(value => <label key={value}><input type="radio" name={`survey-q${i + 1}`} value={value} required checked={answers[i] === value} onChange={() => setAnswers(current => current.map((n, j) => i === j ? value : n))} /><span>{value}</span></label>)}</div>
-      <div className="survey-scale-labels"><span>{assignment.definition.leftLabel ?? (item.left ? '最接近左側' : '')}</span><span>{assignment.definition.rightLabel ?? (item.right ? '最接近右側' : '')}</span></div>
+      {item.type === 'text' ? <textarea aria-label={`第 ${i + 1} 題文字意見`} rows={4} maxLength={item.maxLength ?? 2000} required={item.required !== false} value={String(answers[i] ?? '')} onChange={event => setAnswers(current => current.map((n, j) => i === j ? event.target.value : n))}/> : item.type === 'choice' ? <div className="survey-choice-options" role="radiogroup" aria-label={`第 ${i + 1} 題單選`}>{item.options?.map(value => <label key={value}><input type="radio" name={`survey-q${i + 1}`} value={value} required={item.required !== false} checked={answers[i] === value} onChange={() => setAnswers(current => current.map((n, j) => i === j ? value : n))}/><span>{value}</span></label>)}</div> : <><div className={`survey-options${assignment.definition.optionLabels ? ' survey-options-labeled' : ''}`} style={{ gridTemplateColumns: `repeat(${Math.min(options.length, 6)}, minmax(0, 1fr))` }} role="radiogroup" aria-label={`第 ${i + 1} 題，${min} 至 ${max} 單選`}>{options.map(value => <label key={value}><input type="radio" name={`survey-q${i + 1}`} value={value} required={item.required !== false} checked={answers[i] === value} onChange={() => setAnswers(current => current.map((n, j) => i === j ? value : n))} /><span>{value}</span>{assignment.definition.optionLabels?.[value] && <small>{assignment.definition.optionLabels[value]}</small>}</label>)}</div>
+      <div className="survey-scale-labels"><span>{assignment.definition.leftLabel ?? (item.left ? '最接近左側' : '')}</span><span>{assignment.definition.rightLabel ?? (item.right ? '最接近右側' : '')}</span></div></>}
     </fieldset>)}</fieldset>
-    <div className="survey-submit-bar"><span aria-live="polite">已填 {answers.filter(n => n !== null).length} / {answers.length} 題</span><Button className="action" disabled={busy} type="submit">{busy ? '繳交中…' : uncertain ? '重試原作答' : '繳交問卷'}</Button></div>
+    <div className="survey-submit-bar"><span aria-live="polite">已填 {answers.filter(n => n !== null && n !== '').length} / {answers.length} 題{assignment.definition.items.some(q => q.required === false) && `（${assignment.definition.items.filter(q => q.required === false).length} 題選填）`}</span><Button className="action" disabled={busy} type="submit">{busy ? '繳交中…' : uncertain ? '重試原作答' : '繳交問卷'}</Button></div>
     {uncertain && <p className="survey-muted">為避免重複紀錄，已暫停編輯。重試會使用相同作答與提交編號。</p>}{error && <p className="notice error" role="alert">{error}</p>}
   </form>;
 }

@@ -32,7 +32,7 @@ test('local library, independent links, private notes and completion announcemen
  const ctx={user:{role:'teacher',email:'teacher@example.test'},workshops:[{id:'w',name:'測試班'}],students:[{id:'s',workshop_id:'w',name:'測試學員',email:'student@example.test'}]};
  const call=(name,args={})=>demo.demoSurveyRpc(`nptc_survey_${name}`,args,ctx);
  const custom={code:'custom-example',version:'v1',title:'自訂測試問卷',notice:'僅測試',instructions:['請依實際情況作答。'],minScore:1,maxScore:5,items:[{text:'題目甲'},{text:'題目乙'}],reverseItems:[2],dimensions:{'構面甲':[1,2]}};
- call('library');const fixtureState=JSON.parse(store.get('nptc-surveys-demo-v1'));fixtureState.library.push({code:custom.code,version:custom.version,definition:custom});store.set('nptc-surveys-demo-v1',JSON.stringify(fixtureState));assert.equal(call('library').instruments.length,2);assert.throws(()=>call('library_save',{body:{definition:custom}}),/暫不提供/);
+ call('library');const fixtureState=JSON.parse(store.get('nptc-surveys-demo-v1'));fixtureState.library.push({code:custom.code,version:custom.version,definition:custom});store.set('nptc-surveys-demo-v1',JSON.stringify(fixtureState));assert.equal(call('library').instruments.length,4);assert.throws(()=>call('library_save',{body:{definition:custom}}),/暫不提供/);
  const add={workshopId:'w',scaleCode:definition.code,scaleVersion:definition.version,requestId:'add-first',note:'教師管理註記甲',status:'open'};
  const first=call('assign',{body:add});assert.deepEqual(call('assign',{body:add}),first);
  const second=call('assign',{body:{...add,requestId:'add-second',note:'教師管理註記乙'}});
@@ -55,7 +55,7 @@ test('local library, independent links, private notes and completion announcemen
  assert.throws(()=>call('delete',{body:{...deletion,demoPassword:'wrong'}}),/驗證失敗/);
  assert.throws(()=>call('delete',{body:{...deletion,demoEmail:'other@example.test'}}),/驗證失敗/);
  assert.equal(call('delete',{body:deletion}).deletedResponses,1);
- assert.equal(call('analysis').responses.length,1);assert.equal(call('library').instruments.length,2);
+ assert.equal(call('analysis').responses.length,1);assert.equal(call('library').instruments.length,4);
  assert.equal(call('delete',{body:{id:first.id,revision:0,expectedResponses:0,acknowledgeDataLoss:false}}).deletedResponses,0);
  assert.equal(call('teacher_data',{requested_workshop:'w'}).assignments.length,1);
  delete globalThis.localStorage;

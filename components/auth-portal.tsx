@@ -13,8 +13,8 @@ const BackendApplication = lazy(()=>import('@/components/backend-accounts').then
 const StudentDashboard = lazy(()=>import('@/app/student/student-dashboard'));
 const SurveyLinkPage = lazy(()=>import('@/components/student-surveys').then(module=>({default:module.SurveyLinkPage})));
 
-export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
-  const surveyAssignmentId = new URLSearchParams(location.search).get('survey');
+export function AuthPortal({ teacher = false, shortAssignmentId }: { teacher?: boolean; shortAssignmentId?: string }) {
+  const surveyAssignmentId = shortAssignmentId ?? new URLSearchParams(location.search).get('survey');
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [user, setUser] = useState<{ role: 'teacher' | 'student'; username: string; email: string } | null | undefined>(undefined);
   const [status, setStatus] = useState<Onboarding | null>(null);

@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import './build-survey-catalog.mjs';
 const definition = JSON.parse(await readFile('lib/dti-sk.json', 'utf8'));
 const quote = value => `'${value.replaceAll("'", "''")}'`;
 const seed = `insert into nptc_private.survey_instruments(code,version,definition) values(${quote(definition.code)},${quote(definition.version)},${quote(JSON.stringify(definition))}::jsonb) on conflict(code,version) do nothing;`;

@@ -1,0 +1,36 @@
+{
+  "code": "nptc-learning-satisfaction",
+  "version": "zh-TW-1109-draft-20261029",
+  "title": "為國考而訓：學習滿意度與意見回饋",
+  "notice": "本問卷用於課程滿意度與意見回饋，保存原始回覆，不提供合成總分。",
+  "instructions": [
+    "各位學員您好：為瞭解課程之實際成效，希望藉由此份問卷，提供我們寶貴的意見，作為改進課程的參考。",
+    "前 11 題採五點滿意度單選：1＝非常不滿意、2＝不滿意、3＝尚可、4＝滿意、5＝非常滿意。",
+    "推薦意願請選擇是或否；三題文字意見為選填。"
+  ],
+  "minScore": 1,
+  "maxScore": 5,
+  "leftLabel": "非常不滿意",
+  "rightLabel": "非常滿意",
+  "optionLabels": { "1": "非常不滿意", "2": "不滿意", "3": "尚可", "4": "滿意", "5": "非常滿意" },
+  "scoringStatus": "unscored",
+  "reverseItems": [],
+  "dimensions": {},
+  "items": [
+    { "text": "主題: 診斷思維的謬誤與釐清     講師:張智維專科護理師" },
+    { "text": "臨床思維訓練 I 整體滿意度" },
+    { "text": "主題為OSCE 考題解說與知識建構-雙主訴, 講師: 王家鼎  醫師" },
+    { "text": "臨床思維訓練 II 整體滿意度" },
+    { "text": "OSCE 考題解說與知識建構-認知偏誤, 講師: 張智維  醫師" },
+    { "text": "OSCE教案實作考官整體滿意度" },
+    { "text": "OSCE教案實作SP整體滿意度" },
+    { "text": "考官座談會整體滿意度" },
+    { "text": "課程主題內容是否符合期待" },
+    { "text": "課程場地安排" },
+    { "text": "整體滿意度" },
+    { "type": "text", "required": false, "maxLength": 2000, "text": "您覺得我們的課程最大的特色在哪裡?" },
+    { "type": "choice", "options": ["是", "否"], "text": "往後是否會推薦學弟妹參加課程？" },
+    { "type": "text", "required": false, "maxLength": 2000, "text": "呈上題 ,您的理由是？" },
+    { "type": "text", "required": false, "maxLength": 2000, "text": "對於未來課程安排，您建議的主題是" }
+  ]
+}

@@ -1,19 +1,27 @@
 import definition from './dti-sk.json';
+import vpirsDefinition from './vpirs-e.json';
+import satisfactionDefinition from './learning-satisfaction.json';
 import { scoreSurvey } from './survey-scoring';
-import { validateSurveyAnswers, type SurveyAssignment, type SurveyDefinition, type SurveyInstrument, type SurveyResponse } from './surveys';
+import { validateSurveyResponse, type SurveyAssignment, type SurveyDefinition, type SurveyInstrument, type SurveyResponse } from './surveys';
 
 type Context = { user: { role: string; email: string }; workshops: { id: string; name: string; archived_at?: string | null }[]; students: { id: string; workshop_id: string; email: string; name: string }[] };
 type DemoResponse = SurveyResponse & { requestId: string; userEmail: string };
 type StoredAssignment = SurveyAssignment & { requestId?: string; createdBy?: string };
 type State = { library: SurveyInstrument[]; assignments: StoredAssignment[]; responses: DemoResponse[] };
 const key = 'nptc-surveys-demo-v1';
-const publicDefinition = (d: SurveyDefinition) => { const { reverseItems: _reverse, dimensions: _dimensions, ...visible } = d; return visible; };
+const publicDefinition = (d: SurveyDefinition) => { const { reverseItems: _reverse, dimensions: _dimensions, negativeItems: _negative, ...visible } = d; return visible; };
 
 export function demoSurveyRpc(name: string, args: Record<string, unknown>, ctx: Context) {
   const stored = localStorage.getItem(key);
   const data: State = stored ? JSON.parse(stored) : { library: [], assignments: [], responses: [] };
   let migrated = false;
   if (!data.library?.length) { data.library = [{ code: definition.code, version: definition.version, definition }]; migrated = true; }
+  if (!data.library.some(i => i.code === vpirsDefinition.code && i.version === vpirsDefinition.version)) {
+    data.library.push({ code: vpirsDefinition.code, version: vpirsDefinition.version, definition: vpirsDefinition }); migrated = true;
+  }
+  if (!data.library.some(i => i.code === satisfactionDefinition.code && i.version === satisfactionDefinition.version)) {
+    data.library.push({ code: satisfactionDefinition.code, version: satisfactionDefinition.version, definition: satisfactionDefinition as SurveyDefinition }); migrated = true;
+  }
   data.assignments.forEach(a => {
     if (a.note === undefined) { a.note = a.phase === 'pre' ? '前測' : a.phase === 'post' ? '後測' : ''; delete a.phase; migrated = true; }
     if (!a.created_at) { a.created_at = new Date().toISOString(); migrated = true; }
@@ -112,7 +120,7 @@ export function demoSurveyRpc(name: string, args: Record<string, unknown>, ctx: 
     if (availability(a) !== 'open') throw new Error('問卷尚未開放、已關閉或已截止。');
     if (body.version !== a.scale_version) throw new Error('量表版本不符。');
     if (typeof body.requestId !== 'string' || !body.requestId) throw new Error('請重新開啟問卷後提交。');
-    validateSurveyAnswers(body.answers, a.definition.items.length, a.definition.minScore ?? 1, a.definition.maxScore ?? 6);
+    validateSurveyResponse(body.answers, a.definition);
     data.responses.push({ assignment_id: a.id, student_id: student.id, scale_code: a.scale_code, scale_version: a.scale_version, submitted_at: now, answers: body.answers, scores: scoreSurvey(a.definition, body.answers), requestId: body.requestId, userEmail: ctx.user.email });
     save(); return { ok: true, submitted_at: now };
   }

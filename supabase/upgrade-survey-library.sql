@@ -49,11 +49,35 @@ begin
  end loop;
 end;$$;
 
+create or replace function nptc_private.survey_validate_answers(definition jsonb,answers jsonb) returns void
+language plpgsql immutable set search_path='' as $$
+declare i integer; q jsonb; answer jsonb; item_type text; mn integer:=coalesce(definition->>'minScore','1')::integer; mx integer:=coalesce(definition->>'maxScore','6')::integer;
+begin
+ if jsonb_typeof(answers) is distinct from 'array' then raise exception '請提供完整作答。'; end if;
+ if jsonb_array_length(answers)<>jsonb_array_length(definition->'items') then raise exception '請完成每一題必填作答。'; end if;
+ for i in 0..jsonb_array_length(answers)-1 loop
+  q=definition->'items'->i; answer=answers->i; item_type=coalesce(q->>'type','scale');
+  if q->'required'='false'::jsonb and (answer='null'::jsonb or answer='""'::jsonb) then continue; end if;
+  if item_type='text' then
+   if jsonb_typeof(answer)<>'string' or length(trim(answer#>>'{}'))=0 or length(answer#>>'{}')>least(coalesce((q->>'maxLength')::integer,2000),4000) then raise exception '第 % 題文字內容或長度不正確。',i+1; end if;
+  elsif item_type='choice' then
+   if jsonb_typeof(answer)<>'string' or not coalesce(q->'options','[]'::jsonb) @> jsonb_build_array(answer#>>'{}') then raise exception '請選擇第 % 題的其中一個選項。',i+1; end if;
+  elsif item_type='scale' then
+   if jsonb_typeof(answer)<>'number' or answer::text !~ '^(0|[1-9][0-9]*)$' then raise exception '每題必須選擇量尺中的整數。'; end if;
+   if (answer::text)::integer<mn or (answer::text)::integer>mx then raise exception '作答超出量尺範圍。'; end if;
+  else raise exception '不支援的問卷題型。'; end if;
+ end loop;
+end;$$;
+
 create or replace function nptc_private.survey_score(definition jsonb,answers jsonb) returns jsonb
 language plpgsql immutable set search_path='' as $$
 declare points jsonb:='[]'::jsonb; dims jsonb:='{}'::jsonb; result jsonb; mn integer:=coalesce(definition->>'minScore','1')::integer; mx integer:=coalesce(definition->>'maxScore','6')::integer;
  n integer; i integer; point_value integer; total integer:=0; dimension text; indices jsonb; subtotal integer;
 begin
+ perform nptc_private.survey_validate_answers(definition,answers);
+ if definition->>'scoringStatus' in ('pending','unscored') then
+  return jsonb_build_object('status',definition->>'scoringStatus','itemScores','[]'::jsonb,'total',null,'dimensions','{}'::jsonb);
+ end if;
  if jsonb_typeof(answers) is distinct from 'array' then raise exception '請提供完整作答。'; end if;
  n=jsonb_array_length(definition->'items');
  if jsonb_array_length(answers)<>n then raise exception '請完成每一題。'; end if;
@@ -173,7 +197,7 @@ begin
  if sid is null then raise exception '這份問卷不屬於您的工作坊，請確認使用的是受邀學員帳號。' using errcode='42501'; end if;
  select name into workshop_name from nptc_private.workshops where id=a.workshop_id;
  select submitted_at into submitted from nptc_private.survey_responses where assignment_id=a.id and student_id=sid;
- return jsonb_build_object('workshopName',workshop_name,'assignment',jsonb_build_object('id',a.id,'workshop_id',a.workshop_id,'scale_code',a.scale_code,'scale_version',a.scale_version,'created_at',a.created_at,'status',a.status,'revision',a.revision,'opens_at',a.opens_at,'closes_at',a.closes_at,'definition',a.definition-'reverseItems'-'dimensions','availability',nptc_private.survey_availability(a.id,sid),'submitted_at',submitted));
+ return jsonb_build_object('workshopName',workshop_name,'assignment',jsonb_build_object('id',a.id,'workshop_id',a.workshop_id,'scale_code',a.scale_code,'scale_version',a.scale_version,'created_at',a.created_at,'status',a.status,'revision',a.revision,'opens_at',a.opens_at,'closes_at',a.closes_at,'definition',a.definition-'reverseItems'-'dimensions'-'negativeItems','availability',nptc_private.survey_availability(a.id,sid),'submitted_at',submitted));
 end;$$;
 
 create or replace function public.nptc_survey_submit(body jsonb) returns jsonb
@@ -211,7 +235,7 @@ end;$$;
 
 -- 沿用第一段的封存／快照保護；備註及發布狀態可經 RPC 修改。
 create trigger nptc_survey_assignment_guard before insert or update or delete on nptc_private.survey_assignments for each row execute function nptc_private.survey_guard();
-revoke all on function nptc_private.survey_validate_definition(jsonb),nptc_private.survey_require_student(),nptc_private.survey_availability(uuid,uuid) from public,anon,authenticated;
+revoke all on function nptc_private.survey_validate_definition(jsonb),nptc_private.survey_validate_answers(jsonb,jsonb),nptc_private.survey_require_student(),nptc_private.survey_availability(uuid,uuid) from public,anon,authenticated;
 revoke all on function public.nptc_survey_library(),public.nptc_survey_assign(jsonb),public.nptc_survey_form(uuid) from public,anon;
 grant execute on function public.nptc_survey_library(),public.nptc_survey_assign(jsonb),public.nptc_survey_form(uuid) to authenticated;
 insert into nptc_private.schema_migrations(version) values(2026102902) on conflict do nothing;
