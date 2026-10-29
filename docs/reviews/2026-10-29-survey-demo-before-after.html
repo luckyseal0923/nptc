@@ -1,0 +1,478 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>三次量表 Demo 修改前後對照</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:35px auto;padding:20px;color:#173f37}details{border:1px solid #ccd9d2;border-radius:8px;padding:18px;margin:20px 0}summary{cursor:pointer;font-weight:bold}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f6f1;padding:18px;font-size:13px}button{padding:10px}</style><h1>三次量表 Demo：完整修改前後對照</h1><p>新增僅限 Demo 的 SQL 種子與隔離測試，更新部署及示範操作說明。原量表功能之對照仍保留於先前交付文件。</p><details><summary>supabase/seed-demo-surveys.sql</summary><h2>修改前（完整檔案）</h2><pre>原本沒有此檔案。</pre><h2>修改後（完整檔案）</h2><button onclick="navigator.clipboard.writeText(document.getElementById('after0').textContent)">複製修改後</button><pre id="after0">-- 僅供既有「Demo 示範梯次（20 位學員）」的 01–20 號示範學員。
+-- 先安裝四段量表升級；本檔不加入 install.sql，也不由建置自動執行。
+-- 三次 DTI-SK、共 60 份人工生成作答；不是實際教育介入或量表驗證結果。
+-- 保留現有帳號、名冊、分數及其他發布；重跑不覆寫既有作答。
+begin;
+
+do $$
+declare
+  wid uuid;
+  matches integer;
+  roster_count integer;
+  seed_definition jsonb;
+  publisher constant uuid := &#x27;d7102026-1029-4000-8000-000000000000&#x27;; -- SQL 示範資料標記，非登入帳號。
+  seed_dates constant timestamptz[] := array[&#x27;2026-10-01 01:00:00+00&#x27;,&#x27;2026-10-15 01:00:00+00&#x27;,&#x27;2026-10-29 01:00:00+00&#x27;]::timestamptz[];
+  round_no integer;
+  seed_assignment uuid;
+  publication_request uuid;
+  memo text;
+  student record;
+  points integer;
+  offset_score integer;
+  seed_answers jsonb;
+  invalid_count integer;
+begin
+  if not exists(select 1 from nptc_private.schema_migrations where version=2026102904) then
+    raise exception &#x27;請先完成四段量表升級（至 upgrade-survey-deletion.sql）。&#x27;;
+  end if;
+
+  select count(*) into matches from nptc_private.workshops where name=&#x27;Demo 示範梯次（20 位學員）&#x27;;
+  if matches&lt;&gt;1 then raise exception &#x27;預期正好一個 Demo 示範梯次，目前找到 % 個。&#x27;,matches; end if;
+  select id into wid from nptc_private.workshops where name=&#x27;Demo 示範梯次（20 位學員）&#x27; and archived_at is null for update;
+  if wid is null then raise exception &#x27;Demo 梯次已封存，不得補入示範分數。&#x27;; end if;
+
+  -- 僅以 01–20 號示範名稱及既有已啟用帳號選取，不加入其他名冊或建立 Auth 帳號。
+  select count(*),count(distinct n) into roster_count,matches from (
+    select (regexp_match(s.name,&#x27;^示範學員[[:space:]]*([0-9]{1,2})$&#x27;))[1]::integer n
+    from nptc_private.students s
+    join nptc_private.student_accounts account on account.email=s.email and account.activated_at is not null
+    join auth.users u on u.id=account.user_id
+    where s.workshop_id=wid and s.name ~ &#x27;^示範學員[[:space:]]*[0-9]{1,2}$&#x27;
+  ) targets where n between 1 and 20;
+  if roster_count&lt;&gt;20 or matches&lt;&gt;20 then
+    raise exception &#x27;需有不重複的 01–20 號已啟用示範學員，目前共 % 筆、% 個編號。&#x27;,roster_count,matches;
+  end if;
+
+  select i.definition into seed_definition from nptc_private.survey_instruments i
+  where i.code=&#x27;dti-sk&#x27; and i.version=&#x27;zh-TW-draft-20261029&#x27;;
+  if seed_definition is null then raise exception &#x27;找不到指定的 DTI-SK 14 題版本。&#x27;; end if;
+  perform nptc_private.survey_validate_definition(seed_definition);
+
+  for round_no in 1..3 loop
+    seed_assignment:=md5(&#x27;nptc:demo-survey:20261029:&#x27;||wid::text||&#x27;:&#x27;||round_no)::uuid;
+    publication_request:=md5(&#x27;nptc:demo-survey:request:&#x27;||wid::text||&#x27;:&#x27;||round_no)::uuid;
+    memo:=format(&#x27;Demo 第 %s 次施測｜模擬資料，僅供操作與趨勢示範&#x27;,round_no);
+
+    -- 固定識別避免重跑重複建立；識別遭占用或資料經編輯時停止，不覆寫。
+    if exists(select 1 from nptc_private.survey_assignments a where a.id=seed_assignment and
+      (a.workshop_id,a.scale_code,a.scale_version,a.definition,a.created_by,a.created_at,a.request_id,a.note,a.status,a.phase)
+      is distinct from (wid,&#x27;dti-sk&#x27;::text,&#x27;zh-TW-draft-20261029&#x27;::text,seed_definition,publisher,seed_dates[round_no],publication_request,memo,&#x27;closed&#x27;::text,null::text)) then
+      raise exception &#x27;第 % 次示範發布已被修改或識別衝突，停止以保護現有資料。&#x27;,round_no;
+    end if;
+    insert into nptc_private.survey_assignments(id,workshop_id,scale_code,scale_version,definition,status,note,created_by,created_at,request_id)
+    values(seed_assignment,wid,&#x27;dti-sk&#x27;,&#x27;zh-TW-draft-20261029&#x27;,seed_definition,&#x27;closed&#x27;,memo,publisher,seed_dates[round_no],publication_request)
+    on conflict(id) do nothing;
+
+    for student in
+      select targets.* from (
+        select s.id,account.user_id,(regexp_match(s.name,&#x27;^示範學員[[:space:]]*([0-9]{1,2})$&#x27;))[1]::integer n
+        from nptc_private.students s join nptc_private.student_accounts account on account.email=s.email
+        where s.workshop_id=wid and s.name ~ &#x27;^示範學員[[:space:]]*[0-9]{1,2}$&#x27;
+      ) targets where n between 1 and 20 order by n
+    loop
+      -- 四組不同走勢：持續上升、持平、先升後回落、較晚上升。
+      offset_score:=case (student.n-1)%4
+        when 0 then round_no-1
+        when 1 then 1
+        when 2 then case when round_no=2 then 2 else 1 end
+        else case when round_no=3 then 1 else 0 end end;
+      seed_answers:=&#x27;[]&#x27;::jsonb;
+      for q in 1..14 loop
+        points:=2+((student.n+q*2)%3)+offset_score;
+        seed_answers:=seed_answers||jsonb_build_array(case when seed_definition-&gt;&#x27;reverseItems&#x27; @&gt; to_jsonb(q) then 7-points else points end);
+      end loop;
+      insert into nptc_private.survey_responses(assignment_id,student_id,user_id,request_id,answers,scores,submitted_at)
+      values(seed_assignment,student.id,student.user_id,
+        md5(&#x27;nptc:demo-survey:response:&#x27;||seed_assignment::text||&#x27;:&#x27;||student.id::text)::uuid,
+        seed_answers,nptc_private.survey_score(seed_definition,seed_answers),seed_dates[round_no]+interval &#x27;1 hour&#x27;+student.n*interval &#x27;3 minutes&#x27;)
+      on conflict(assignment_id,student_id) do nothing;
+
+      if not exists(select 1 from nptc_private.survey_responses r where r.assignment_id=seed_assignment and r.student_id=student.id
+        and r.user_id=student.user_id and r.answers=seed_answers and r.scores=nptc_private.survey_score(seed_definition,seed_answers)
+        and r.request_id=md5(&#x27;nptc:demo-survey:response:&#x27;||seed_assignment::text||&#x27;:&#x27;||student.id::text)::uuid) then
+        raise exception &#x27;第 % 次示範作答與現有資料衝突，停止且不覆寫。&#x27;,round_no;
+      end if;
+    end loop;
+
+    select count(*) into roster_count from nptc_private.survey_responses r where r.assignment_id=seed_assignment;
+    if roster_count&lt;&gt;20 then raise exception &#x27;第 % 次應有 20 筆示範作答，目前為 % 筆。&#x27;,round_no,roster_count; end if;
+  end loop;
+
+  select count(*) into invalid_count from nptc_private.survey_responses r
+  join nptc_private.survey_assignments a on a.id=r.assignment_id
+  where a.workshop_id=wid and a.created_by=publisher and r.scores&lt;&gt;nptc_private.survey_score(a.definition,r.answers);
+  if invalid_count&lt;&gt;0 then raise exception &#x27;示範計分不一致，已取消本次變更。&#x27;; end if;
+end;$$;
+
+select a.note,a.created_at,count(r.id)::integer responses,
+  round(avg((r.scores-&gt;&gt;&#x27;total&#x27;)::numeric),2) mean_total,
+  min((r.scores-&gt;&gt;&#x27;total&#x27;)::integer) min_total,max((r.scores-&gt;&gt;&#x27;total&#x27;)::integer) max_total
+from nptc_private.survey_assignments a
+join nptc_private.workshops w on w.id=a.workshop_id
+left join nptc_private.survey_responses r on r.assignment_id=a.id
+where w.name=&#x27;Demo 示範梯次（20 位學員）&#x27; and a.created_by=&#x27;d7102026-1029-4000-8000-000000000000&#x27;
+group by a.id order by a.created_at;
+
+commit;
+</pre></details><details><summary>tests/demo-survey-seed-sql.mjs</summary><h2>修改前（完整檔案）</h2><pre>原本沒有此檔案。</pre><h2>修改後（完整檔案）</h2><button onclick="navigator.clipboard.writeText(document.getElementById('after1').textContent)">複製修改後</button><pre id="after1">import { PGlite } from &#x27;@electric-sql/pglite&#x27;;
+import { readFileSync } from &#x27;node:fs&#x27;;
+import assert from &#x27;node:assert/strict&#x27;;
+import test from &#x27;node:test&#x27;;
+import { scoring } from &#x27;./helpers-surveys.mjs&#x27;;
+
+test(&#x27;three demo rounds preserve scope, account identity, scores and repeatability&#x27;, async t =&gt; {
+  const db = new PGlite();
+  const root = &#x27;00000000-0000-0000-0000-000000000001&#x27;;
+  const workshop = &#x27;10000000-0000-0000-0000-000000000001&#x27;;
+  const other = &#x27;10000000-0000-0000-0000-000000000002&#x27;;
+  const seed = readFileSync(&#x27;supabase/seed-demo-surveys.sql&#x27;, &#x27;utf8&#x27;);
+  const definition = JSON.parse(readFileSync(&#x27;lib/dti-sk.json&#x27;, &#x27;utf8&#x27;));
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth;
+      create table auth.users(id uuid primary key,email text unique,email_confirmed_at timestamptz,encrypted_password text);
+      create function auth.uid() returns uuid language sql as $$select nullif(current_setting(&#x27;test.uid&#x27;,true),&#x27;&#x27;)::uuid$$;
+      create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object(&#x27;email&#x27;,current_setting(&#x27;test.email&#x27;,true))$$;
+      grant usage on schema auth to anon,authenticated;`);
+    for (const file of [&#x27;install&#x27;, &#x27;upgrade-surveys&#x27;, &#x27;upgrade-survey-library&#x27;, &#x27;upgrade-survey-analysis&#x27;, &#x27;upgrade-survey-deletion&#x27;]) {
+      await db.exec(readFileSync(`supabase/${file}.sql`, &#x27;utf8&#x27;));
+    }
+    await db.query(&#x27;insert into auth.users values($1,$2,now(),$3)&#x27;, [root, &#x27;chin.wei.chang0923@gmail.com&#x27;, &#x27;fixture-only&#x27;]);
+    await db.query(&#x27;insert into nptc_private.workshops(id,name) values($1,$2),($3,$4)&#x27;, [workshop, &#x27;Demo 示範梯次（20 位學員）&#x27;, other, &#x27;其他梯次&#x27;]);
+    for (let n = 1; n &lt;= 23; n++) {
+      const sid = `20000000-0000-0000-0000-${String(n).padStart(12, &#x27;0&#x27;)}`;
+      const uid = `30000000-0000-0000-0000-${String(n).padStart(12, &#x27;0&#x27;)}`;
+      const email = `synthetic-${n}@example.invalid`;
+      await db.query(&#x27;insert into auth.users values($1,$2,now(),$3)&#x27;, [uid, email, &#x27;fixture-only&#x27;]);
+      await db.query(&#x27;insert into nptc_private.student_accounts(user_id,email,activated_at) values($1,$2,now())&#x27;, [uid, email]);
+      await db.query(&#x27;insert into nptc_private.students(id,workshop_id,name,email,phone,updated_by) values($1,$2,$3,$4,$5,$6)&#x27;,
+        [sid, n === 23 ? other : workshop, n === 22 ? &#x27;另一位學員&#x27; : `示範學員 ${String(n === 23 ? 1 : n).padStart(2, &#x27;0&#x27;)}`, email, `09${String(n).padStart(8, &#x27;0&#x27;)}`, root]);
+    }
+    const before = (await db.query(`select (select jsonb_agg(to_jsonb(s) order by id) from nptc_private.students s) students,
+      (select jsonb_agg(to_jsonb(a) order by user_id) from nptc_private.student_accounts a) accounts,
+      (select count(*)::int from auth.users) users`)).rows;
+    const snapshot = async () =&gt; (await db.query(`select
+      (select jsonb_agg(to_jsonb(a) order by id) from nptc_private.survey_assignments a) assignments,
+      (select jsonb_agg(to_jsonb(r) order by id) from nptc_private.survey_responses r) responses`)).rows;
+
+    await t.test(&#x27;only the twenty numbered demo students receive three closed rounds&#x27;, async () =&gt; {
+      await db.exec(seed);
+      const assignments = (await db.query(&#x27;select * from nptc_private.survey_assignments order by created_at&#x27;)).rows;
+      assert.equal(assignments.length, 3);
+      assert.ok(assignments.every(a =&gt; a.workshop_id === workshop &amp;&amp; a.status === &#x27;closed&#x27; &amp;&amp; a.phase === null));
+      assert.deepEqual(assignments.map(a =&gt; a.created_at.toISOString().slice(0, 10)), [&#x27;2026-10-01&#x27;, &#x27;2026-10-15&#x27;, &#x27;2026-10-29&#x27;]);
+      assert.ok(assignments.every(a =&gt; a.note.includes(&#x27;模擬資料&#x27;)));
+      const rows = (await db.query(`select r.*,s.name,account.user_id expected_user from nptc_private.survey_responses r
+        join nptc_private.students s on s.id=r.student_id join nptc_private.student_accounts account on account.email=s.email`)).rows;
+      assert.equal(rows.length, 60);
+      assert.ok(rows.every(r =&gt; r.user_id === r.expected_user));
+      assert.ok(rows.every(r =&gt; r.name !== &#x27;示範學員 21&#x27; &amp;&amp; r.name !== &#x27;另一位學員&#x27;));
+      for (const r of rows) assert.deepEqual(r.scores, scoring.scoreSurvey(definition, r.answers));
+      for (const a of assignments) assert.equal(rows.filter(r =&gt; r.assignment_id === a.id).length, 20);
+      const unchanged = (await db.query(`select (select jsonb_agg(to_jsonb(s) order by id) from nptc_private.students s) students,
+        (select jsonb_agg(to_jsonb(a) order by user_id) from nptc_private.student_accounts a) accounts,
+        (select count(*)::int from auth.users) users`)).rows;
+      assert.deepEqual(unchanged, before);
+    });
+    await t.test(&#x27;person and group trends use existing identities and varied trajectories&#x27;, async () =&gt; {
+      await db.query(&quot;select set_config(&#x27;test.uid&#x27;,$1,false),set_config(&#x27;test.email&#x27;,$2,false)&quot;, [root, &#x27;chin.wei.chang0923@gmail.com&#x27;]);
+      await db.exec(&#x27;set role authenticated&#x27;);
+      const data = (await db.query(&#x27;select public.nptc_survey_analysis($1) result&#x27;, [workshop])).rows[0].result;
+      await db.exec(&#x27;reset role&#x27;);
+      assert.ok(data.responses.every(r =&gt; data.students.some(s =&gt; s.id === r.student_id &amp;&amp; s.identity === r.identity)));
+      const totals = (await db.query(`select s.name,array_agg((r.scores-&gt;&gt;&#x27;total&#x27;)::int order by a.created_at) scores
+        from nptc_private.survey_responses r join nptc_private.survey_assignments a on a.id=r.assignment_id
+        join nptc_private.students s on s.id=r.student_id group by s.id order by s.name`)).rows;
+      const [up, flat, dip, late] = totals.map(r =&gt; r.scores);
+      assert.ok(up[0] &lt; up[1] &amp;&amp; up[1] &lt; up[2]);
+      assert.equal(flat[0], flat[1]); assert.equal(flat[1], flat[2]);
+      assert.ok(dip[0] &lt; dip[1] &amp;&amp; dip[1] &gt; dip[2]);
+      assert.equal(late[0], late[1]); assert.ok(late[1] &lt; late[2]);
+    });
+    await t.test(&#x27;repeated seed does not add or change saved responses&#x27;, async () =&gt; {
+      const saved = await snapshot(); await db.exec(seed); assert.deepEqual(await snapshot(), saved);
+    });
+    await t.test(&#x27;edited publications and incomplete demo rosters stop safely&#x27;, async () =&gt; {
+      const first = (await db.query(&#x27;select id from nptc_private.survey_assignments order by created_at limit 1&#x27;)).rows[0].id;
+      await db.query(&quot;update nptc_private.survey_assignments set note=&#x27;教師已修改&#x27; where id=$1&quot;, [first]);
+      const saved = await snapshot();
+      await assert.rejects(() =&gt; db.exec(seed), /已被修改或識別衝突/); await db.exec(&#x27;rollback&#x27;);
+      assert.deepEqual(await snapshot(), saved);
+      await db.query(&quot;update nptc_private.student_accounts set activated_at=null where email=&#x27;synthetic-1@example.invalid&#x27;&quot;);
+      await assert.rejects(() =&gt; db.exec(seed), /01–20 號/); await db.exec(&#x27;rollback&#x27;);
+      assert.deepEqual(await snapshot(), saved);
+    });
+  } finally { await db.close(); }
+});
+</pre></details><details><summary>docs/surveys.md</summary><h2>修改前（完整檔案）</h2><pre># NPTC 量表庫與獨立問卷連結
+
+2026-10-29 依使用者最新指示完成整段本機驗證：型別檢查、69 項自動化測試、正式模式建置，以及發布、學員繳交、老師查分、刪除警示與手機版畫面。驗證紀錄見 [本次結果](reviews/2026-10-29-surveys-final-validation.md)。原始碼交付至 `codex/dti-sk-surveys` 功能分支；正式資料庫與網站尚未更新。
+
+## 教師操作
+
+1. 執行 `pnpm dev:demo` 後，開啟本機 `/teacher/`，以 `teacher`／`demo1234` 登入。
+2. 進入「量表管理庫」，點選「發布管理」後選擇 OSCE 梯次。
+3. 在梯次卡片點選「加入量表」，直接由彈出清單選擇，不會切換分頁。量表庫分頁可另行展開完整題目及說明。
+4. 從清單選取量表、填寫備註，再選擇立即開放或先保存草稿。
+5. 每次加入均建立獨立問卷及連結；可複製或使用裝置的分享功能，再自行貼到課程群組或訊息中。系統不會自動代寄。
+6. 教師可修改發布狀態、開放／截止時間及備註。所有時間欄位以臺灣時間輸入，資料庫以 UTC 儲存。
+7. 在「問卷完成情形」查看學員是否繳交；如需研究資料，可按問卷或整個梯次匯出 CSV。
+
+備註已依使用者確認設定為「僅老師可見」。備註不包含在學員公告、問卷頁或分享網址中。量表本身的「量表註記」是另一個欄位，會顯示給學員，例如翻譯初稿及版本適用範圍。
+
+同一份量表可加入不同梯次，也可在同一梯次加入多次。每次加入均獨立計算完成狀態。系統不強制分前後測，也不限制哪份須先完成；需要的分類由教師自行備註。
+
+## 量表內容維護（依最新要求暫不開放新增）
+
+量表庫預載本對話確認的 DTI-SK。其他實際量表未由使用者提供，因此沒有加入虛構量表或未確認的題項。
+
+依使用者最新要求，已移除「新增量表至庫」及「建立修訂版」操作，網站先只供查看及選用既有量表。其他量表日後再由使用者安排加入。資料格式保留以下支援：
+
+- 單一敘述＋數字單選。
+- 左右兩個敘述＋數字單選。
+- 可設定量尺上下限，範圍為 0–10 的整數。
+- 量尺兩端文字、反向題及構面名稱。
+
+此版尚未提供自由文字、多選、跳題或逐題不同量尺。若其他量表有這些需求，需再依實際內容擴充。
+
+加入梯次時會保存完整題目快照；日後新增其他版本時，也不會改變已發布問卷或既有作答。計分依問卷快照，由伺服器換算；前端不能指定總分。
+
+DTI-SK 使用先前確認的 14 題，保留左右敘述及 1–6 量尺，第 1、5、6、7、10 題使用修訂文字。持續標示「繁體中文翻譯初稿，未經驗證」。其既定反向題及構面分類仍保存於該版本。
+
+## 學員流程
+
+教師分享的連結格式為 `/student/?survey=問卷發布編號`。學員未登入時先輸入帳密，登入後接續開啟該份問卷；已登入且符合梯次名冊時直接填答。
+
+本機示範學員：`student-demo@example.test`／`demo1234`。本次將示範登入改為 Email 與密碼，讓試用方式與正式帳密登入相近；正式環境仍沿用既有 StudentLogin 及帳號啟用流程。
+
+每題單選且不預選答案。繳交後只顯示已完成及收件時間，不回傳學員原答或分數。網路逾時時保留相同提交編號，可重試原作答，避免建立重複紀錄。
+
+「我的 OSCE 成績」頁僅顯示「問卷填寫公告」，列出量表名稱、是否完成、發布與完成時間。題目不直接放在成績頁，未完成且開放中的問卷可由連結前往填寫。公告 API 不含問卷分數、教師備註、題目、反向規則或其他學員資料。原有 OSCE 成績功能不變。
+
+## 本機資料與正式資料分開
+
+`pnpm dev:demo` 使用瀏覽器 localStorage，僅供同一瀏覽器的本機試用。示範連結中的 localhost 網址不能直接讓其他人的裝置連到您的電腦；正式網站與中央資料庫安裝完成後，才可分享正式網址。
+
+本機舊示範資料會保留。原前後測分類移成可編輯的教師備註，不再用來限制填答順序。這是資料格式調整，不代表舊紀錄被刪除或重新計分。
+
+## 正式升級安排（本段尚未執行）
+
+1. 先依主 README 備份資料並完成既有 NPTC 資料庫。
+2. 安裝完整 `supabase/upgrade-surveys.sql`。
+3. 接著執行完整 `supabase/upgrade-survey-library.sql`。此檔新增量表庫、獨立問卷加入及問卷連結 RPC，移除固定類別限制，保留原始作答與快照。
+4. 接著執行 `supabase/upgrade-survey-analysis.sql`，最後執行 `supabase/upgrade-survey-deletion.sql`。
+5. 使用 `verify-surveys.sql` 與 `verify-survey-library.sql` 唯讀檢查安裝；完成真實帳號與專用測試梯次驗收後，再部署正式前端。
+
+第二段升級完成後，第一段升級會拒絕單獨重跑，以保護新量表庫流程；之後的重跑使用第二段升級。推送 GitHub 或前端建置不會自動安裝 SQL。本次未執行任何正式 SQL、主機調整或網站部署。
+
+資料表仍位於 `nptc_private`，保留 RLS 與無直接資料表權限的設計。老師 API 逐次確認後臺權限；學員 API 確認已啟用帳號及所屬梯次。直接取得其他梯次的問卷編號也不能繳交。
+
+既有封存與永久刪除保護沿用第一段：封存後僅能依角色查看；有作答的學員不能從名冊直接刪除。完整梯次的永久刪除仍需既有管理者重新驗證流程。
+
+## 資料匯出
+
+問卷作答 CSV 包含梯次、學員代碼、獨立問卷編號、量表代碼與版本、教師備註、每題原答及換算、構面及總分。不同問卷題數會補空欄，未填答不會當作零分。姓名、Email、手機與個人背景不包含在研究匯出內；教師仍可和名冊對照，因此不能稱為完全匿名。
+
+不再提供固定前後測配對按鈕；研究者可依問卷編號、備註及學員代碼安排後續分析。
+
+## 修改紀錄與後續驗證
+
+- 完整第二段修改前後對照：`docs/reviews/2026-10-29-survey-library-before-after.html`。
+- 本段變更與待驗項目：`docs/reviews/2026-10-29-survey-library.md`。
+- 第二、三段開發時依使用者要求暫緩驗證；本次已補驗。歷史紀錄保留當時狀態，現況以 [本次驗證紀錄](reviews/2026-10-29-surveys-final-validation.md) 為準。
+
+
+## 量表管理庫與發布管理
+
+後臺選單已改名為「量表管理庫」，內有「量表庫」與「發布管理」兩分頁。發布管理以可點選整列的 OSCE 梯次卡片呈現，名稱與說明靠左、展開控制靠右，問卷內容在卡片下方展開。
+
+每個梯次的「加入量表」會開啟同頁清單，填寫教師備註並確認即可加入，不切換到量表庫。量表庫本身仍可展開題目與指定加入的梯次；新增量表及建立修訂版入口維持移除。
+
+## 老師查看量表分數與趨勢
+
+進入「學習分析儀表板」，選擇「量表分數與趨勢」。可篩選 OSCE 梯次、量表版本、學員姓名及分數項目；分數項目包含總分與該量表定義的構面。
+
+- 選擇全部學員時，圖表呈現各次發布的平均，並列出每個點的有效分數筆數。
+- 選擇或點選單一學員時，圖表呈現該學員的歷次分數。
+- 橫軸按發布時間排序，標示教師備註；未填備註時顯示發布次序。實際填寫時間列於學員分數明細。
+- 不同量表或不同版本分開比較；草稿不列入應填份數，未填答留空，不當作 0 分，也不連接缺漏的資料點。
+- 點選分數可查看該次保存的題目、原始答案及換算得分。學員端的 API 及成績頁仍只提供完成狀態。
+- 跨梯次以作答帳號串接，保留歷史帳號識別；同名不直接視為同一人。資料範圍沿用後臺角色，系統管理者可包含封存梯次。
+
+## 刪除單次問卷發布
+
+問卷卡片新增「刪除本次發布」。開啟時讀取最新作答筆數及設定版本。
+
+- 尚無作答：確認後刪除該次發布，原填答連結失效。
+- 已有作答或分數：明確警示筆數、要求勾選資料永久刪除確認，再輸入目前管理員的 Email 及密碼。帳號必須是目前登入且已啟用的後臺管理員。
+- 正式模式使用獨立、不持久保存的 Auth client 重新登入；密碼只送至既有 Auth 服務，不傳入問卷刪除 RPC，也不存入日誌或瀏覽器儲存。
+- 後端重新計算筆數並檢查設定版本、管理員權限，以及兩分鐘內的密碼登入與一次性 session。期間有新作答或設定改動會拒絕刪除，須重新讀取警示。
+- 刪除僅影響該次發布與它的作答，量表庫原始內容、其他發布及其他梯次保留。刪除事件只留下問卷識別、量表版本、操作者、時間及筆數，不保留被刪除的答案。
+- 封存梯次須先依既有管理流程還原，才能刪除問卷。
+
+本機示範刪除驗證使用 `teacher-demo@example.test`／`demo1234`，僅模擬本瀏覽器資料操作，不能當成正式身分驗證結果。
+
+## 第三段正式升級順序（本次未執行）
+
+依序安裝現行 NPTC 基礎資料庫、`upgrade-surveys.sql`、`upgrade-survey-library.sql`、`upgrade-survey-analysis.sql`、`upgrade-survey-deletion.sql`，再完成正式帳號驗收與前端部署。四份升級已在隔離 PGlite 資料庫執行驗證；尚未安裝至正式 Supabase。尚未安裝對應 SQL 時，新功能會顯示資料庫設定提示。
+
+先前第三段完整來源對照見 `docs/reviews/2026-10-29-survey-trends-before-after.html`；驗證中修正的登出與排序之完整檔案對照見 `docs/reviews/2026-10-29-survey-validation-before-after.html`。正式 Auth、真實帳密及正式永久刪除流程仍須以專用測試梯次驗收。
+</pre><h2>修改後（完整檔案）</h2><button onclick="navigator.clipboard.writeText(document.getElementById('after2').textContent)">複製修改後</button><pre id="after2"># NPTC 量表庫與獨立問卷連結
+
+2026-10-29 已完成量表功能本機驗證、正式資料庫四段升級的唯讀核對，以及 API 簽章與前端公開金鑰同步。本次依使用者授權合併至 `main`，由既有正式網站流程部署。既有功能驗證見 [驗證結果](reviews/2026-10-29-surveys-final-validation.md)，三次示範施測與發布範圍見 [Demo 交付紀錄](reviews/2026-10-29-survey-demo-release.md)。
+
+## 教師操作
+
+1. 執行 `pnpm dev:demo` 後，開啟本機 `/teacher/`，以 `teacher`／`demo1234` 登入。
+2. 進入「量表管理庫」，點選「發布管理」後選擇 OSCE 梯次。
+3. 在梯次卡片點選「加入量表」，直接由彈出清單選擇，不會切換分頁。量表庫分頁可另行展開完整題目及說明。
+4. 從清單選取量表、填寫備註，再選擇立即開放或先保存草稿。
+5. 每次加入均建立獨立問卷及連結；可複製或使用裝置的分享功能，再自行貼到課程群組或訊息中。系統不會自動代寄。
+6. 教師可修改發布狀態、開放／截止時間及備註。所有時間欄位以臺灣時間輸入，資料庫以 UTC 儲存。
+7. 在「問卷完成情形」查看學員是否繳交；如需研究資料，可按問卷或整個梯次匯出 CSV。
+
+備註已依使用者確認設定為「僅老師可見」。備註不包含在學員公告、問卷頁或分享網址中。量表本身的「量表註記」是另一個欄位，會顯示給學員，例如翻譯初稿及版本適用範圍。
+
+同一份量表可加入不同梯次，也可在同一梯次加入多次。每次加入均獨立計算完成狀態。系統不強制分前後測，也不限制哪份須先完成；需要的分類由教師自行備註。
+
+## 量表內容維護（依最新要求暫不開放新增）
+
+量表庫預載本對話確認的 DTI-SK。其他實際量表未由使用者提供，因此沒有加入虛構量表或未確認的題項。
+
+依使用者最新要求，已移除「新增量表至庫」及「建立修訂版」操作，網站先只供查看及選用既有量表。其他量表日後再由使用者安排加入。資料格式保留以下支援：
+
+- 單一敘述＋數字單選。
+- 左右兩個敘述＋數字單選。
+- 可設定量尺上下限，範圍為 0–10 的整數。
+- 量尺兩端文字、反向題及構面名稱。
+
+此版尚未提供自由文字、多選、跳題或逐題不同量尺。若其他量表有這些需求，需再依實際內容擴充。
+
+加入梯次時會保存完整題目快照；日後新增其他版本時，也不會改變已發布問卷或既有作答。計分依問卷快照，由伺服器換算；前端不能指定總分。
+
+DTI-SK 使用先前確認的 14 題，保留左右敘述及 1–6 量尺，第 1、5、6、7、10 題使用修訂文字。持續標示「繁體中文翻譯初稿，未經驗證」。其既定反向題及構面分類仍保存於該版本。
+
+## 學員流程
+
+教師分享的連結格式為 `/student/?survey=問卷發布編號`。學員未登入時先輸入帳密，登入後接續開啟該份問卷；已登入且符合梯次名冊時直接填答。
+
+本機示範學員：`student-demo@example.test`／`demo1234`。本次將示範登入改為 Email 與密碼，讓試用方式與正式帳密登入相近；正式環境仍沿用既有 StudentLogin 及帳號啟用流程。
+
+每題單選且不預選答案。繳交後只顯示已完成及收件時間，不回傳學員原答或分數。網路逾時時保留相同提交編號，可重試原作答，避免建立重複紀錄。
+
+「我的 OSCE 成績」頁僅顯示「問卷填寫公告」，列出量表名稱、是否完成、發布與完成時間。題目不直接放在成績頁，未完成且開放中的問卷可由連結前往填寫。公告 API 不含問卷分數、教師備註、題目、反向規則或其他學員資料。原有 OSCE 成績功能不變。
+
+## 本機資料與正式資料分開
+
+`pnpm dev:demo` 使用瀏覽器 localStorage，僅供同一瀏覽器的本機試用。示範連結中的 localhost 網址不能直接讓其他人的裝置連到您的電腦；正式網站與中央資料庫安裝完成後，才可分享正式網址。
+
+本機舊示範資料會保留。原前後測分類移成可編輯的教師備註，不再用來限制填答順序。這是資料格式調整，不代表舊紀錄被刪除或重新計分。
+
+## 正式升級安排與目前狀態
+
+本專案正式資料庫已核對完成四段量表升級，無須為本次前端發布重裝。以下保留給尚未安裝的新環境；GitHub 建置不會自行執行 SQL。
+
+1. 先依主 README 備份資料並完成既有 NPTC 資料庫。
+2. 安裝完整 `supabase/upgrade-surveys.sql`。
+3. 接著執行完整 `supabase/upgrade-survey-library.sql`。此檔新增量表庫、獨立問卷加入及問卷連結 RPC，移除固定類別限制，保留原始作答與快照。
+4. 接著執行 `supabase/upgrade-survey-analysis.sql`，最後執行 `supabase/upgrade-survey-deletion.sql`。
+5. 使用 `verify-surveys.sql` 與 `verify-survey-library.sql` 唯讀檢查安裝；完成真實帳號與專用測試梯次驗收後，再部署正式前端。
+
+第二段升級完成後，第一段升級會拒絕單獨重跑，以保護新量表庫流程；之後的重跑使用第二段升級。推送 GitHub 或前端建置不會自動安裝 SQL。示範分數使用下方獨立種子檔，與資料庫安裝分開。
+
+## Demo 示範梯次的三次量表
+
+既有「Demo 示範梯次（20 位學員）」已加入同一版本 DTI-SK 的三次獨立施測，日期為 2026-10-01、10-15、10-29，各有 01–20 號示範學員的 20 份作答，共 60 份。平均總分依序為 48.95、55.95、59.45；每位學員均有三次紀錄，可查看上升、持平或波動的個人走勢。
+
+操作：老師登入 → 學習分析儀表板 → 量表分數與趨勢 → 選擇該 Demo 梯次及 DTI-SK。選擇全部學員查看各次平均，點選示範學員查看個人趨勢，點分數可看逐題作答與反向換算。
+
+三次發布的教師備註均註明模擬資料，狀態為關閉，避免與新的實際填答混合；學員端仍只公告完成情形。這些人工分數僅供操作示範，不能用作學習成效或量表驗證證據，翻譯初稿未經驗證的標註保留。
+
+來源為 `supabase/seed-demo-surveys.sql`，只選取指定梯次、01–20 號名稱及既有已啟用帳號，不建立 Auth 帳號，不改名冊或 OSCE 成績，也不寫入其他梯次。固定發布與提交識別可重跑，既有資料衝突則停止，不覆寫。此檔不納入 `install.sql`，也不會由建置或部署自動執行。本機 `dev:demo` 的瀏覽器資料與此正式資料庫示範梯次分開保存。
+
+資料表仍位於 `nptc_private`，保留 RLS 與無直接資料表權限的設計。老師 API 逐次確認後臺權限；學員 API 確認已啟用帳號及所屬梯次。直接取得其他梯次的問卷編號也不能繳交。
+
+既有封存與永久刪除保護沿用第一段：封存後僅能依角色查看；有作答的學員不能從名冊直接刪除。完整梯次的永久刪除仍需既有管理者重新驗證流程。
+
+## 資料匯出
+
+問卷作答 CSV 包含梯次、學員代碼、獨立問卷編號、量表代碼與版本、教師備註、每題原答及換算、構面及總分。不同問卷題數會補空欄，未填答不會當作零分。姓名、Email、手機與個人背景不包含在研究匯出內；教師仍可和名冊對照，因此不能稱為完全匿名。
+
+不再提供固定前後測配對按鈕；研究者可依問卷編號、備註及學員代碼安排後續分析。
+
+## 修改紀錄與後續驗證
+
+- 完整第二段修改前後對照：`docs/reviews/2026-10-29-survey-library-before-after.html`。
+- 本段變更與待驗項目：`docs/reviews/2026-10-29-survey-library.md`。
+- 第二、三段開發時依使用者要求暫緩驗證；本次已補驗。歷史紀錄保留當時狀態，現況以 [本次驗證紀錄](reviews/2026-10-29-surveys-final-validation.md) 為準。
+
+
+## 量表管理庫與發布管理
+
+後臺選單已改名為「量表管理庫」，內有「量表庫」與「發布管理」兩分頁。發布管理以可點選整列的 OSCE 梯次卡片呈現，名稱與說明靠左、展開控制靠右，問卷內容在卡片下方展開。
+
+每個梯次的「加入量表」會開啟同頁清單，填寫教師備註並確認即可加入，不切換到量表庫。量表庫本身仍可展開題目與指定加入的梯次；新增量表及建立修訂版入口維持移除。
+
+## 老師查看量表分數與趨勢
+
+進入「學習分析儀表板」，選擇「量表分數與趨勢」。可篩選 OSCE 梯次、量表版本、學員姓名及分數項目；分數項目包含總分與該量表定義的構面。
+
+- 選擇全部學員時，圖表呈現各次發布的平均，並列出每個點的有效分數筆數。
+- 選擇或點選單一學員時，圖表呈現該學員的歷次分數。
+- 橫軸按發布時間排序，標示教師備註；未填備註時顯示發布次序。實際填寫時間列於學員分數明細。
+- 不同量表或不同版本分開比較；草稿不列入應填份數，未填答留空，不當作 0 分，也不連接缺漏的資料點。
+- 點選分數可查看該次保存的題目、原始答案及換算得分。學員端的 API 及成績頁仍只提供完成狀態。
+- 跨梯次以作答帳號串接，保留歷史帳號識別；同名不直接視為同一人。資料範圍沿用後臺角色，系統管理者可包含封存梯次。
+
+## 刪除單次問卷發布
+
+問卷卡片新增「刪除本次發布」。開啟時讀取最新作答筆數及設定版本。
+
+- 尚無作答：確認後刪除該次發布，原填答連結失效。
+- 已有作答或分數：明確警示筆數、要求勾選資料永久刪除確認，再輸入目前管理員的 Email 及密碼。帳號必須是目前登入且已啟用的後臺管理員。
+- 正式模式使用獨立、不持久保存的 Auth client 重新登入；密碼只送至既有 Auth 服務，不傳入問卷刪除 RPC，也不存入日誌或瀏覽器儲存。
+- 後端重新計算筆數並檢查設定版本、管理員權限，以及兩分鐘內的密碼登入與一次性 session。期間有新作答或設定改動會拒絕刪除，須重新讀取警示。
+- 刪除僅影響該次發布與它的作答，量表庫原始內容、其他發布及其他梯次保留。刪除事件只留下問卷識別、量表版本、操作者、時間及筆數，不保留被刪除的答案。
+- 封存梯次須先依既有管理流程還原，才能刪除問卷。
+
+本機示範刪除驗證使用 `teacher-demo@example.test`／`demo1234`，僅模擬本瀏覽器資料操作，不能當成正式身分驗證結果。
+
+## 第三段正式升級順序（本次未執行）
+
+依序安裝現行 NPTC 基礎資料庫、`upgrade-surveys.sql`、`upgrade-survey-library.sql`、`upgrade-survey-analysis.sql`、`upgrade-survey-deletion.sql`，再完成正式帳號驗收與前端部署。四份升級已在隔離 PGlite 資料庫執行驗證；尚未安裝至正式 Supabase。尚未安裝對應 SQL 時，新功能會顯示資料庫設定提示。
+
+先前第三段完整來源對照見 `docs/reviews/2026-10-29-survey-trends-before-after.html`；驗證中修正的登出與排序之完整檔案對照見 `docs/reviews/2026-10-29-survey-validation-before-after.html`。正式 Auth、真實帳密及正式永久刪除流程仍須以專用測試梯次驗收。
+</pre></details><details><summary>docs/reviews/2026-10-29-survey-demo-release.md</summary><h2>修改前（完整檔案）</h2><pre>原本沒有此檔案。</pre><h2>修改後（完整檔案）</h2><button onclick="navigator.clipboard.writeText(document.getElementById('after3').textContent)">複製修改後</button><pre id="after3"># 量表功能正式發布與三次 Demo 資料
+
+使用者授權合併 `main`、更新正式網站，並在既有 Demo 示範梯次建立至少三次同份量表的模擬分數。
+
+## 已建立的正式資料庫示範內容
+
+| 日期（臺灣） | 量表 | 完成份數 | 平均總分 | 總分範圍 |
+| --- | --- | --- | --- | --- |
+| 2026-10-01 | DTI-SK／zh-TW-draft-20261029 | 20 | 48.95 | 41–57 |
+| 2026-10-15 | 同上 | 20 | 55.95 | 41–71 |
+| 2026-10-29 | 同上 | 20 | 59.45 | 55–71 |
+
+- 僅既有「Demo 示範梯次（20 位學員）」01–20 號示範學員，沿用各自已啟用帳號，三次共 60 份，沒有建立新登入帳號。
+- 原始 14 題答案先產生，再經既有伺服器計分函式計算反向題、構面與總分。四組走勢包含持續上升、持平、先升後回落及較晚上升。
+- 三次教師備註均註明模擬資料，發布狀態為關閉。翻譯初稿未經驗證標示及學員不公開問卷分數的規則維持。
+- 本次模擬分數不代表真實教育介入效果或心理計量證據。
+
+## 資料與權限邊界
+
+新增獨立 `supabase/seed-demo-surveys.sql`，不納入自動安裝或建置。SQL 先核對唯一且未封存的指定梯次、01–20 號已啟用帳號、完整量表升級及題目版本，才新增三次發布與作答。固定識別支援重跑；發布或作答已被修改時報錯且整筆交易回滾。
+
+發布操作者使用明確的 SQL 示範資料標記 UUID，並非登入帳號；作答帳號使用現有示範學員實際連結的 user_id，確保個人分析與名冊識別一致。
+
+正式資料庫加入前後比對：梯次、完整名冊、OSCE 既有成績、其他梯次的量表發布及作答雜湊全部相同，學員帳號與 Auth 帳號筆數均相同。原 Demo 另兩筆名冊未新增此三次模擬作答。
+
+## 驗證
+
+- 新增隔離 SQL 測試涵蓋 20 人×3 次、計分與 JavaScript 一致、帳號身分一致、四種走勢、其他名冊排除、重跑不變，以及設定衝突／名冊不完整時停止。
+- 完整 `pnpm check` 通過，包含既有量表權限、學員分數隱私及管理員刪除驗證。
+- 正式 SQL 執行後已讀回三次各 20 份與上述平均分數。
+- 應用功能來源包含先前已驗證的量表庫、原地加入量表、獨立學員連結、完成公告及老師分數趨勢；以 `main` 為本次正式發布分支。
+- 真實帳密重新登入、正式填答提交與永久刪除仍不列為本次已完成的端到端驗收。本次種子寫入不是學員實際繳交測試。
+
+完整新增來源及修改前後對照：`2026-10-29-survey-demo-before-after.html`。部署執行與畫面另存本機 `outputs/verification/`，不包含金鑰或真實個資。
+</pre></details></html>
