@@ -1,0 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { transpileModule, ScriptTarget, ModuleKind } from 'typescript';
+export const definition = JSON.parse(readFileSync('lib/dti-sk.json','utf8'));
+const compile = path => transpileModule(readFileSync(path,'utf8'),{compilerOptions:{target:ScriptTarget.ES2022,module:ModuleKind.ESNext}}).outputText;
+const url = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const surveysUrl = url(compile('lib/surveys.ts'));
+const scoringUrl = url(compile('lib/survey-scoring.ts').replaceAll("'./surveys'",JSON.stringify(surveysUrl)));
+const demoUrl = url(compile('lib/survey-demo.ts').replace(/import definition from '\.\/dti-sk.json';/,`const definition=${JSON.stringify(definition)};`).replaceAll("'./survey-scoring'",JSON.stringify(scoringUrl)).replaceAll("'./surveys'",JSON.stringify(surveysUrl)));
+export const surveys = await import(surveysUrl);
+export const scoring = await import(scoringUrl);
+export const demo = await import(demoUrl);

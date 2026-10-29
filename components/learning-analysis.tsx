@@ -1,5 +1,5 @@
 import { DomainRadar } from '@/components/domain-radar';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Users, RefreshCw, ArrowLeft, Search } from 'lucide-react';
 import { rpc } from '@/lib/supabase';
 import { retryingRequest } from '@/lib/retrying-request';
@@ -10,8 +10,14 @@ const number = (value: number | null) => value === null ? '—' : value.toFixed(
 const percent = (value: number | null) => value === null ? '尚無法判定' : `${value.toFixed(1)}%`;
 const examStatus = (e: Exam) => e.score === null ? '未評分' : e.threshold === null ? '尚無門檻' : e.score >= e.threshold ? '及格' : '未達及格';
 const emptyFilters: Record<Dimension,string> = { hospital:'',unit:'',exam_specialty:'',nursing_years:'',first_osce:'' };
+const SurveyAnalysis = lazy(() => import('@/components/survey-analysis'));
 
 export default function LearningAnalysis({ currentWorkshopId, onWorkshopChange }: { currentWorkshopId?: string; onWorkshopChange?: (id: string) => void }) {
+  const [view, setView] = useState<'osce' | 'surveys'>('osce');
+  return <div className="analysis-workspace"><nav className="analysis-area-tabs" aria-label="學習分析項目"><button aria-current={view === 'osce' ? 'page' : undefined} onClick={() => setView('osce')}>OSCE 成績分析</button><button aria-current={view === 'surveys' ? 'page' : undefined} onClick={() => setView('surveys')}>量表分數與趨勢</button></nav>{view === 'osce' ? <OsceLearningAnalysis currentWorkshopId={currentWorkshopId} onWorkshopChange={onWorkshopChange}/> : <Suspense fallback={<p role="status">正在載入量表分析…</p>}><SurveyAnalysis currentWorkshopId={currentWorkshopId}/></Suspense>}</div>;
+}
+
+function OsceLearningAnalysis({ currentWorkshopId, onWorkshopChange }: { currentWorkshopId?: string; onWorkshopChange?: (id: string) => void }) {
   const [data,setData] = useState<AnalysisData[] | null>(null);
   const [error,setError] = useState('');
   const [retrying,setRetrying] = useState(false);

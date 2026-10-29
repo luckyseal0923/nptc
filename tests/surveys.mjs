@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {definition,surveys,scoring,demo} from './helpers-surveys.mjs';
+
+const best = [6,6,6,6,1,1,6,1,1,6,6,1,1,1];
+test('DTI-SK scoring, revised wording and boundaries',()=>{
+ assert.equal(definition.items.length,14);
+ assert.equal(definition.items[0].left,'與病人面談時，我經常將思考侷限在某一種可能的診斷上。');
+ assert.equal(definition.items[4].left,'與病人面談時，我通常能注意到重要的臨床線索。');
+ assert.equal(definition.items[5].left,'蒐集病人資訊時，我通常能自然而然地將相似的資訊歸納在一起。');
+ assert.equal(definition.items[6].left,'與病人面談時，我難以忽略與診斷無關的資訊。');
+ assert.equal(definition.items[9].left,'做出診斷決策時，我會根據每個可能診斷本身的依據，逐一評估後做出判斷。');
+ assert.deepEqual(scoring.scoreSurvey(definition,best),{itemScores:Array(14).fill(6),total:84,flexibility:42,structure:42,dimensions:{flexibility:42,structure:42}});
+ assert.equal(scoring.scoreSurvey(definition,best.map(n=>7-n)).total,14);
+ const six=scoring.scoreSurvey(definition,Array(14).fill(6));assert.equal(six.total,49);assert.equal(six.flexibility,27);assert.equal(six.structure,22);
+ for(const a of [[],Array(13).fill(1),Array(15).fill(1),[...best.slice(0,13),0],[...best.slice(0,13),7],[...best.slice(0,13),true],[...best.slice(0,13),'1'],[...best.slice(0,13),1.5],[...best.slice(0,13),null]])assert.throws(()=>scoring.scoreSurvey(definition,a));
+});
+test('Taipei schedule conversion and CSV data integrity',()=>{
+ assert.equal(surveys.taipeiToUtc('2026-10-29T09:30'),'2026-10-29T01:30:00.000Z');
+ assert.equal(surveys.taipeiInput('2026-10-28T23:59:00Z'),'2026-10-29T07:59');
+ assert.equal(surveys.taipeiToUtc(''),null);
+ assert.throws(()=>surveys.taipeiToUtc('2026-02-30T09:30'));
+ const r={assignment_id:'a',student_id:'s1',scale_code:'dti-sk',scale_version:definition.version,submitted_at:'2026-10-29T01:30:00Z',answers:best,scores:scoring.scoreSurvey(definition,best)};
+ const data={workshop:{id:'w1',name:'=HYPERLINK(test)'},participants:['s1','s2'],responses:[{...r,phase:'pre'},{...r,phase:'post',scores:scoring.scoreSurvey(definition,best.map(n=>7-n))}]};
+ let csv=surveys.surveyPairsCsv(data);assert.ok(csv.startsWith('\uFEFF'));assert.match(csv,/'?"-70"/);assert.match(csv,/已配對/);assert.match(csv,/未填答/);
+ const partial=surveys.surveyPairsCsv({...data,responses:[{...r,phase:'pre'}]});assert.match(partial,/僅前測/);assert.ok(!partial.includes('"-84"'));
+ const different=surveys.surveyPairsCsv({...data,responses:[{...r,phase:'pre'},{...r,phase:'post',scale_version:'other-version'}]});assert.ok(!different.includes('已配對'));
+ csv=surveys.surveyResponsesCsv({...data,workshop:{id:'=BAD()',name:'x'}});assert.ok(csv.includes("'=BAD()"));assert.ok(!csv.includes('Email'));assert.ok(!csv.includes('手機'));
+});
+test('local library, independent links, private notes and completion announcements',()=>{
+ const store=new Map();globalThis.localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)};
+ const ctx={user:{role:'teacher',email:'teacher@example.test'},workshops:[{id:'w',name:'測試班'}],students:[{id:'s',workshop_id:'w',name:'測試學員',email:'student@example.test'}]};
+ const call=(name,args={})=>demo.demoSurveyRpc(`nptc_survey_${name}`,args,ctx);
+ const custom={code:'custom-example',version:'v1',title:'自訂測試問卷',notice:'僅測試',instructions:['請依實際情況作答。'],minScore:1,maxScore:5,items:[{text:'題目甲'},{text:'題目乙'}],reverseItems:[2],dimensions:{'構面甲':[1,2]}};
+ call('library');const fixtureState=JSON.parse(store.get('nptc-surveys-demo-v1'));fixtureState.library.push({code:custom.code,version:custom.version,definition:custom});store.set('nptc-surveys-demo-v1',JSON.stringify(fixtureState));assert.equal(call('library').instruments.length,2);assert.throws(()=>call('library_save',{body:{definition:custom}}),/暫不提供/);
+ const add={workshopId:'w',scaleCode:definition.code,scaleVersion:definition.version,requestId:'add-first',note:'教師管理註記甲',status:'open'};
+ const first=call('assign',{body:add});assert.deepEqual(call('assign',{body:add}),first);
+ const second=call('assign',{body:{...add,requestId:'add-second',note:'教師管理註記乙'}});
+ const third=call('assign',{body:{...add,requestId:'add-third',scaleCode:custom.code,scaleVersion:custom.version}});
+ assert.equal(call('teacher_data',{requested_workshop:'w'}).assignments.length,3);
+ ctx.user={role:'student',email:'student@example.test'};assert.throws(()=>call('library'));assert.throws(()=>call('export',{requested_workshop:'w'}));
+ const body={assignmentId:second.id,requestId:'answer-second',version:definition.version,answers:best};const receipt=call('submit',{body});assert.deepEqual(call('submit',{body}),receipt);assert.throws(()=>call('submit',{body:{...body,answers:Array(14).fill(1)}}),/不可覆寫/);
+ call('submit',{body:{assignmentId:third.id,requestId:'answer-third',version:custom.version,answers:[5,1]}});
+ const summary=call('student_data',{requested_student:'s'});assert.equal(summary.assignments.filter(a=>a.submitted_at).length,2);assert.equal(summary.assignments.find(a=>a.id===first.id).availability,'open');
+ const form=call('form',{requested_assignment:first.id});assert.equal(form.assignment.definition.items.length,14);
+ for(const word of ['itemScores','reverseItems','scores','教師管理註記','note']) {assert.ok(!JSON.stringify(summary).includes(word));assert.ok(!JSON.stringify(form).includes(word));}
+ ctx.user={role:'teacher',email:'teacher@example.test'};assert.equal(call('export',{requested_workshop:'w'}).responses.find(r=>r.assignment_id===third.id).scores.total,10);
+ ctx.user={role:'student',email:'student@example.test'};assert.throws(()=>call('analysis'));assert.throws(()=>call('delete_info',{requested_assignment:second.id}));
+ ctx.user={role:'teacher',email:'teacher@example.test'};
+ const analysis=call('analysis');assert.equal(analysis.responses.length,2);assert.equal(analysis.responses[0].identity,'email:student@example.test');
+ const info=call('delete_info',{requested_assignment:second.id});assert.equal(info.responseCount,1);
+ const deletion={id:second.id,revision:info.revision,expectedResponses:1,acknowledgeDataLoss:true,demoEmail:ctx.user.email,demoPassword:'demo1234'};
+ assert.throws(()=>call('delete',{body:{...deletion,expectedResponses:0}}),/筆數已變更/);
+ assert.throws(()=>call('delete',{body:{...deletion,acknowledgeDataLoss:false}}),/確認永久刪除/);
+ assert.throws(()=>call('delete',{body:{...deletion,demoPassword:'wrong'}}),/驗證失敗/);
+ assert.throws(()=>call('delete',{body:{...deletion,demoEmail:'other@example.test'}}),/驗證失敗/);
+ assert.equal(call('delete',{body:deletion}).deletedResponses,1);
+ assert.equal(call('analysis').responses.length,1);assert.equal(call('library').instruments.length,2);
+ assert.equal(call('delete',{body:{id:first.id,revision:0,expectedResponses:0,acknowledgeDataLoss:false}}).deletedResponses,0);
+ assert.equal(call('teacher_data',{requested_workshop:'w'}).assignments.length,1);
+ delete globalThis.localStorage;
+});

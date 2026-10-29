@@ -1,5 +1,5 @@
 import Link from '@/components/link';
-import { DEMO_MODE, signInDemo, signInDemoStudent, signOutDemo } from '@/lib/demo';
+import { DEMO_MODE, signInDemo, signOutDemo } from '@/lib/demo';
 import { supabase } from '@/lib/supabase';
 import { Activity, LockKeyhole } from 'lucide-react';
 import { useState } from 'react';
@@ -65,7 +65,7 @@ export function PortalShell({
 
 export function LoginPanel({ teacher = false }: { teacher?: boolean }) {
   const role = teacher ? 'teacher' : 'student';
-  const [username, setUsername] = useState(DEMO_MODE ? (teacher ? 'teacher' : 'student') : '');
+  const [username, setUsername] = useState(DEMO_MODE ? (teacher ? 'teacher' : 'student-demo@example.test') : '');
   const [password, setPassword] = useState(DEMO_MODE ? 'demo1234' : '');
   const [phone, setPhone] = useState(DEMO_MODE && !teacher ? '0912345678' : '');
   const [busy, setBusy] = useState(false);
@@ -80,8 +80,7 @@ export function LoginPanel({ teacher = false }: { teacher?: boolean }) {
     setSent(false);
     try {
       if (DEMO_MODE) {
-        if (teacher) signInDemo(role, username.trim(), password);
-        else signInDemoStudent(username.trim(), phone);
+        signInDemo(role, username.trim(), password);
       } else {
         if (!teacher) sessionStorage.setItem('nptc-pending-student-phone', phone.trim().replace(/[\s-]/g, ''));
         const { error: authError } = await supabase.auth.signInWithOtp({ email: username.trim(), options: { emailRedirectTo: new URL(`${import.meta.env.BASE_URL}${teacher ? 'teacher/' : 'student/'}`, location.origin).href } });
@@ -116,7 +115,7 @@ export function LoginPanel({ teacher = false }: { teacher?: boolean }) {
       <section className="rounded-2xl border border-[#d5e0d8] bg-white p-8 shadow-sm">
         <LockKeyhole className="mb-7 h-8 w-8 text-[#174943]" />
         <h2 className="text-2xl font-black">{teacher ? (applying ? '申請後臺帳號' : '後臺管理系統登入') : '學員登入'}</h2>
-        <p className="mt-3 text-sm leading-6 text-[#5c7772]">{teacher ? (isDemo ? '使用展示帳號登入，資料只會儲存在此瀏覽器。' : '輸入 Email 收取驗證連結；首次申請者驗證後填寫資料，待管理員啟用。') : isDemo ? '請輸入名冊中的 Email 與手機電話進行雙欄驗證。' : '系統會寄送 Email 驗證連結；開啟連結後，再以名冊中的手機電話完成驗證。'}</p>
+        <p className="mt-3 text-sm leading-6 text-[#5c7772]">{teacher ? (isDemo ? '使用展示帳號登入，資料只會儲存在此瀏覽器。' : '輸入 Email 收取驗證連結；首次申請者驗證後填寫資料，待管理員啟用。') : isDemo ? '請輸入示範學員的 Email 與密碼，登入後接續填寫問卷。' : '請輸入學員 Email 與密碼。'}</p>
         {teacher && !isDemo && <div className="mt-5 flex gap-4"><button type="button" className="underline" onClick={() => { setApplying(false); setSent(false); }}>登入後臺</button><button type="button" className="underline" onClick={() => { setApplying(true); setSent(false); }}>申請帳號</button></div>}
         {sent && <p role="status" className="mt-4 rounded-md bg-green-50 p-3 text-sm">驗證連結已寄出，請至信箱開啟。首次使用後臺者需填寫申請資料並等待啟用。</p>}
         <form className="mt-7 space-y-5" onSubmit={login}>
@@ -124,15 +123,15 @@ export function LoginPanel({ teacher = false }: { teacher?: boolean }) {
             {isDemo && teacher ? '帳號' : 'Email'}
             <Input type={isDemo && teacher ? 'text' : 'email'} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" className="mt-2" required />
           </label>
-          {teacher ? isDemo && <label className="block text-sm font-medium">密碼<Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" className="mt-2" required /></label> : <label className="block text-sm font-medium">手機電話<Input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" inputMode="numeric" pattern="09[0-9]{8}" placeholder="例如：0912345678" className="mt-2" required /></label>}
+          {(teacher ? isDemo : true) && <label className="block text-sm font-medium">密碼<Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" className="mt-2" required /></label>}
           {error && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
           <Button type="submit" disabled={busy} className="w-full bg-[#174943] hover:bg-[#0f3834]">
-            {busy ? '驗證中…' : teacher ? (isDemo ? '登入展示帳號' : '寄送後臺登入連結') : (isDemo ? '驗證並登入' : '寄送 Email 驗證連結')}
+            {busy ? '登入中…' : teacher ? (isDemo ? '登入展示帳號' : '寄送後臺登入連結') : '登入'}
           </Button>
         </form>
         {isDemo && <div className="mt-6 border-t border-[#dbe4dc] pt-5 text-sm leading-6 text-[#5c7772]">
           <p>老師：<strong className="text-[#174943]">teacher／demo1234</strong></p>
-          <p>學員：<strong className="text-[#174943]">student-demo@example.test／0912345678</strong></p>
+          <p>學員：<strong className="text-[#174943]">student-demo@example.test／demo1234</strong></p>
         </div>}
       </section>
     </div>

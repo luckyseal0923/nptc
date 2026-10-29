@@ -4,6 +4,16 @@
 
 正式網站：[nptc-wfh.zeabur.app](https://nptc-wfh.zeabur.app/)。老師使用 [/teacher/](https://nptc-wfh.zeabur.app/teacher/)，學員使用 [/student/](https://nptc-wfh.zeabur.app/student/)。正式 Auth 回跳設定以 backend-password-login.md 的四個路徑為準。
 
+## 線上量表（功能分支，本機已驗證）
+
+最新修改：選單「量表管理庫」內分為「量表庫」與「發布管理」，點選 OSCE 梯次可展開發布內容；學習分析儀表板增加學員量表分數與同版量表歷次趨勢。新增量表入口維持移除，學員端不公布問卷分數。
+
+發布管理的「加入量表」改為原地清單；問卷可刪除，已有作答時需顯示影響筆數並重新驗證目前管理員的 Email 與密碼。相關 SQL 僅準備來源，未在正式環境執行。
+
+2026-10-29 完成型別檢查、69 項自動化測試、正式模式建置與本機瀏覽器流程／手機排版檢查。完整結果與限制見 [本次驗證紀錄](docs/reviews/2026-10-29-surveys-final-validation.md)。變更交付至 `codex/dti-sk-surveys` 功能分支，正式資料庫與網站未更新。操作及四份 SQL 升級順序見 [量表功能說明](docs/surveys.md)。
+
+執行 `pnpm dev:demo` 可使用示範帳號試用，資料僅存瀏覽器。DTI-SK 持續標示「翻譯初稿，未經驗證」；程式驗證不代表量表本身已完成驗證。
+
 ## 登入與帳號
 
 - 後臺：Email＋密碼登入。新申請者須確認信箱並經系統管理者啟用，未啟用與停用帳號不能讀寫課程。

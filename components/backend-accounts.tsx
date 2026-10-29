@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { rpc, supabase } from '@/lib/supabase';
+import { DEMO_MODE, signOutDemo } from '@/lib/demo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ConfirmWorkshopAction } from '@/components/confirm-workshop-action';
@@ -24,6 +25,7 @@ export function BackendApplication({ email }: { email: string }) {
       <Button type="button" disabled={signingOut} className="h-auto min-h-12 whitespace-normal py-3" onClick={async () => {
         setSigningOut(true); setSignOutError('');
         try {
+          if (DEMO_MODE) { signOutDemo(); location.reload(); return; }
           const { error } = await supabase.auth.signOut({ scope: 'local' });
           if (error) throw error;
         } catch {

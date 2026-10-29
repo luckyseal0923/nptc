@@ -3,7 +3,7 @@ import { REQUIRED_SCHEMA_VERSION } from './schema';
 import { computeThreshold, DEFAULT_STATIONS, type StationDefinition } from './grading';
 
 // 正式模式：所有名冊、題目與成績都由 Supabase 儲存。
-export const DEMO_MODE = false;
+export const DEMO_MODE = import.meta.env?.DEV === true && import.meta.env?.MODE === 'demo';
 
 type DemoRole = 'teacher' | 'student';
 type DemoUser = { role: DemoRole; username: string; email: string };
@@ -74,7 +74,7 @@ export function demoUser(): DemoUser | null {
 }
 export function signInDemo(role: DemoRole, username: string, password: string) {
   const account = accounts[role];
-  if (username !== account.username || password !== account.password) throw new Error('帳號或密碼不正確。');
+  if ((username !== account.username && !(role === 'student' && username.trim().toLowerCase() === account.email)) || password !== account.password) throw new Error('帳號或密碼不正確。');
   const user: DemoUser = { role: account.role, username: account.username, email: account.email };
   localStorage.setItem(sessionKey, JSON.stringify(user));
 }
@@ -102,6 +102,10 @@ export async function demoRpc<T>(name: string, args: Record<string, unknown> = {
   if (name === 'nptc_sync_student_email') return { ok: true } as T;
   if (name === 'nptc_is_account_reviewer') return false as T;
   const data = state();
+  if (name.startsWith('nptc_survey_')) {
+    const { demoSurveyRpc } = await import('./survey-demo');
+    return demoSurveyRpc(name, args, { user, workshops: data.workshops, students: data.students }) as T;
+  }
   if (name === 'nptc_teacher_data' || name === 'nptc_analysis_data') {
     requireTeacher();
     const requested = args.requested_workshop as string | null | undefined;

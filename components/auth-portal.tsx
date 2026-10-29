@@ -6,12 +6,15 @@ import { DEMO_MODE, demoUser } from '@/lib/demo';
 import { rpc, supabase } from '@/lib/supabase';
 import { LoginPanel, PortalShell } from '@/components/portal-shell';
 import { REQUIRED_SCHEMA_VERSION } from '@/lib/schema';
+import '@/app/surveys.css';
 
 const BackendWorkspace = lazy(()=>import('@/components/backend-workspace').then(module=>({default:module.BackendWorkspace})));
 const BackendApplication = lazy(()=>import('@/components/backend-accounts').then(module=>({default:module.BackendApplication})));
 const StudentDashboard = lazy(()=>import('@/app/student/student-dashboard'));
+const SurveyLinkPage = lazy(()=>import('@/components/student-surveys').then(module=>({default:module.SurveyLinkPage})));
 
 export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
+  const surveyAssignmentId = new URLSearchParams(location.search).get('survey');
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [user, setUser] = useState<{ role: 'teacher' | 'student'; username: string; email: string } | null | undefined>(undefined);
   const [status, setStatus] = useState<Onboarding | null>(null);
@@ -46,7 +49,9 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
   }, [email, uid, sessionReady, teacher, version, recovery]);
   const reload = () => setVersion(v => v + 1);
   return <PortalShell email={user?.username ?? email} teacher={teacher}>
+    {DEMO_MODE && <p className="survey-local-notice" role="status">本機展示模式：所有填答僅存於此瀏覽器，請使用示範資料。</p>}
     <Suspense fallback={<p role="status" className="px-6 py-12 text-center">正在載入頁面…</p>}>
+    {!teacher && surveyAssignmentId && !user && <p className="survey-login-notice">請先使用學員 Email 與密碼登入，登入後會接續開啟這份問卷。</p>}
     {error ? <div className="mx-auto max-w-xl space-y-4 px-6 py-12" role="alert"><p>{error}</p><button className="underline" onClick={reload}>重新檢查</button></div>
     : user === undefined ? <p className="px-6 py-12 text-center">正在確認登入狀態…</p>
     : !user ? <>{recovery && <p className="p-4 text-center" role="alert">請開啟最新的重設密碼信件；連結失效時可重新申請。</p>}{!DEMO_MODE ? (teacher ? <BackendLogin /> : <StudentLogin />) : <LoginPanel teacher={teacher} />}</>
@@ -54,6 +59,7 @@ export function AuthPortal({ teacher = false }: { teacher?: boolean }) {
     : teacher && user.role !== 'teacher' ? <BackendApplication email={user.email} />
     : teacher ? <BackendWorkspace key={user.email} />
     : !DEMO_MODE && user.role !== 'teacher' && status?.stage !== 'active' ? <StudentActivation key={user.email} email={user.email} status={status ?? { stage: 'unclaimed' }} onComplete={reload} />
+    : surveyAssignmentId ? <SurveyLinkPage key={`${user.email}-${surveyAssignmentId}`} assignmentId={surveyAssignmentId}/>
     : <div className="workspace"><StudentDashboard /></div>}
     </Suspense>
   </PortalShell>;

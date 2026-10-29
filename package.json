@@ -7,8 +7,10 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:demo": "vite --mode demo --host 127.0.0.1",
     "build": "node scripts/sync-hospitals.mjs && node scripts/build-supabase.mjs && vite build && node scripts/static-routes.mjs",
     "build:sql": "node scripts/build-supabase.mjs",
+    "build:surveys": "node scripts/build-surveys.mjs",
     "typecheck": "tsc --noEmit --incremental false && tsc -p tsconfig.edge.json --noEmit",
     "test": "node scripts/test.mjs",
     "check": "pnpm typecheck && pnpm test",

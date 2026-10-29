@@ -3,10 +3,11 @@ import react from '@vitejs/plugin-react';
 import {defineConfig,loadEnv} from 'vite';
 import {fileURLToPath} from 'node:url';
 
-export default defineConfig(({mode})=>{
+export default defineConfig(({mode,command})=>{
  const env=loadEnv(mode,process.cwd(),'NEXT_PUBLIC_SUPABASE_');
- const url=env.NEXT_PUBLIC_SUPABASE_URL?.trim();
- const key=env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+ const localDemo=command==='serve'&&mode==='demo';
+ const url=localDemo?'http://127.0.0.1:54321':env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+ const key=localDemo?'sb_publishable_local_demo_only':env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
  if(!url||!key)throw new Error('請在 .env.local 設定 Supabase URL 與 anon key。');
  const parsedUrl = new URL(url);
  const isLocalHost = parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1';

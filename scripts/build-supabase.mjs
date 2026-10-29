@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import './build-surveys.mjs';
 
 export const baseline = ['setup','upgrade-workshop-management','upgrade-score-feedback','upgrade-student-phone',
   'upgrade-student-profile','upgrade-dynamic-osce-stations','upgrade-backend-accounts','upgrade-student-activation',

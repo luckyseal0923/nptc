@@ -1,0 +1,380 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>NPTC 量表驗證修正完整對照</title><style>body{font:16px system-ui;margin:32px;color:#163f35;background:#f7faf5}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{min-width:0;background:white;padding:18px;border:1px solid #cedacd;border-radius:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.7 monospace}button{padding:10px;color:#174943}@media(max-width:900px){.pair{grid-template-columns:1fr}}</style><h1>NPTC 量表功能驗證修正</h1><p>2026-10-29：修正展示模式登出及同發布時間排序，以下提供完整對應檔案。型別、自動化檢查與正式模式建置已通過；詳細範圍見本次驗證紀錄。正式 Supabase 尚未升級。</p><h2>components/backend-accounts.tsx</h2><div class="pair"><section><h3>修改前</h3><button onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent)">複製完整檔案</button><pre>import { useEffect, useState } from &#x27;react&#x27;;
+import { rpc, supabase } from &#x27;@/lib/supabase&#x27;;
+import { Button } from &#x27;@/components/ui/button&#x27;;
+import { Input } from &#x27;@/components/ui/input&#x27;;
+import { ConfirmWorkshopAction } from &#x27;@/components/confirm-workshop-action&#x27;;
+import { BackendEntryLayout } from &#x27;@/components/backend-login&#x27;;
+import Link from &#x27;@/components/link&#x27;;
+
+type Account = { email: string; name: string; reason: string; status: &#x27;pending&#x27; | &#x27;active&#x27; | &#x27;disabled&#x27;; protected?: boolean; systemAdmin?: boolean };
+type Status = { application: Account | null; canReview: boolean };
+const labels = { pending: &#x27;等待審核&#x27;, active: &#x27;已啟用&#x27;, disabled: &#x27;已停用&#x27; };
+
+export function BackendApplication({ email }: { email: string }) {
+  const [applying, setApplying] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState(&#x27;&#x27;);
+  return &lt;BackendEntryLayout&gt;
+    &lt;h2 className=&quot;text-2xl font-black&quot;&gt;後臺管理系統登入&lt;/h2&gt;
+    &lt;div role=&quot;alert&quot; className=&quot;mt-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700&quot;&gt;
+      &lt;p className=&quot;break-all font-bold&quot; style={{ color: &#x27;inherit&#x27; }}&gt;目前登入帳號：{email}&lt;/p&gt;
+      &lt;p className=&quot;mt-2 leading-7&quot; style={{ color: &#x27;inherit&#x27; }}&gt;此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;div className=&quot;mt-6 flex flex-col gap-4&quot;&gt;
+      &lt;Button type=&quot;button&quot; disabled={signingOut} className=&quot;h-auto min-h-12 whitespace-normal py-3&quot; onClick={async () =&gt; {
+        setSigningOut(true); setSignOutError(&#x27;&#x27;);
+        try {
+          const { error } = await supabase.auth.signOut({ scope: &#x27;local&#x27; });
+          if (error) throw error;
+        } catch {
+          setSignOutError(&#x27;登出未完成，請稍後重試。&#x27;);
+          setSigningOut(false);
+        }
+      }}&gt;{signingOut ? &#x27;登出中…&#x27; : &#x27;登出並使用管理員帳號登入&#x27;}&lt;/Button&gt;
+      &lt;Button type=&quot;button&quot; variant=&quot;outline&quot; disabled={signingOut} aria-expanded={applying} aria-controls=&quot;backend-permission-application&quot; onClick={() =&gt; setApplying(!applying)}&gt;{applying ? &#x27;收合申請表&#x27; : &#x27;申請後臺管理權限&#x27;}&lt;/Button&gt;
+      &lt;Link href=&quot;/student/&quot; className=&quot;text-center underline&quot;&gt;返回學員專區&lt;/Link&gt;
+    &lt;/div&gt;
+    {signOutError &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;mt-4 text-red-700&quot;&gt;{signOutError}&lt;/p&gt;}
+    {applying &amp;&amp; &lt;div id=&quot;backend-permission-application&quot; className=&quot;mt-7 border-t pt-6&quot;&gt;&lt;BackendApplicationForm email={email}/&gt;&lt;/div&gt;}
+  &lt;/BackendEntryLayout&gt;;
+}
+
+function BackendApplicationForm({ email }: { email: string }) {
+  const [status, setStatus] = useState&lt;Status | null&gt;(null);
+  const [error, setError] = useState(&#x27;&#x27;);
+  const [busy, setBusy] = useState(false);
+  async function refresh() {
+    setError(&#x27;&#x27;);
+    try {
+      let current = await rpc&lt;Status&gt;(&#x27;nptc_backend_account_status&#x27;);
+      if (!current.application) {
+        const { data, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        // Metadata is application text only. Approval remains in the guarded RPC.
+        const draft = data.user?.user_metadata?.backend_application;
+        if (typeof draft?.name === &#x27;string&#x27; &amp;&amp; typeof draft?.reason === &#x27;string&#x27; &amp;&amp; draft.name.trim() &amp;&amp; draft.reason.trim()) {
+          current = await rpc&lt;Status&gt;(&#x27;nptc_apply_backend_account&#x27;, { body: { name: draft.name, reason: draft.reason } });
+        }
+      }
+      setStatus(current);
+    }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void refresh(); }, []);
+  return &lt;section&gt;&lt;h3 className=&quot;text-xl font-bold&quot;&gt;申請後臺管理權限&lt;/h3&gt;&lt;p className=&quot;form-help break-all&quot;&gt;申請帳號：{email}&lt;/p&gt;
+    {error &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;notice error&quot;&gt;{error}&lt;/p&gt;}
+    {!status ? &lt;Button className=&quot;action&quot; onClick={refresh}&gt;重新載入申請狀態&lt;/Button&gt; : status.application ? &lt;&gt;
+      &lt;h2&gt;{labels[status.application.status]}&lt;/h2&gt;&lt;p className=&quot;form-help&quot;&gt;{status.application.status === &#x27;pending&#x27; ? &#x27;申請已送出，請等待系統管理者啟用帳號。&#x27; : status.application.status === &#x27;disabled&#x27; ? &#x27;目前無法使用後臺功能，請聯絡系統管理者協助。&#x27; : &#x27;帳號已啟用，請重新載入進入後臺。&#x27;}&lt;/p&gt;
+      &lt;Button className=&quot;action&quot; onClick={() =&gt; location.reload()}&gt;重新確認啟用狀態&lt;/Button&gt;
+    &lt;/&gt; : &lt;form className=&quot;entry-form&quot; onSubmit={async (event) =&gt; {
+      event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError(&#x27;&#x27;);
+      try { setStatus(await rpc&lt;Status&gt;(&#x27;nptc_apply_backend_account&#x27;, { body: { name: fields.get(&#x27;name&#x27;), reason: fields.get(&#x27;reason&#x27;) } })); }
+      catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+    }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name=&quot;name&quot; required maxLength={100} autoComplete=&quot;name&quot; /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name=&quot;reason&quot; required maxLength={500} placeholder=&quot;例如：協助工作坊評分與名冊管理&quot; /&gt;&lt;/label&gt;&lt;p className=&quot;form-help&quot;&gt;系統管理者啟用後，即以一般管理員身分管理工作坊、學員名冊與成績。&lt;/p&gt;&lt;Button className=&quot;action&quot; type=&quot;submit&quot;&gt;{busy ? &#x27;送出中…&#x27; : &#x27;送出帳號申請&#x27;}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+  &lt;/section&gt;;
+}
+
+export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
+  const [canReview, setCanReview] = useState(false);
+  const [accounts, setAccounts] = useState&lt;Account[]&gt;([]);
+  const [open, setOpen] = useState(expanded);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(&#x27;&#x27;);
+  const [editing, setEditing] = useState&lt;string | null&gt;(null);
+  async function load() {
+    setError(&#x27;&#x27;);
+    try {
+      const status = await rpc&lt;Status&gt;(&#x27;nptc_backend_account_status&#x27;); setCanReview(status.canReview);
+      if (status.canReview) setAccounts(await rpc&lt;Account[]&gt;(&#x27;nptc_backend_accounts&#x27;));
+    } catch(e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  if (!canReview &amp;&amp; !error) return null;
+  return &lt;section className=&quot;data-panel&quot; style={{ marginTop: 24 }}&gt;
+    &lt;div className=&quot;panel-heading&quot;&gt;&lt;h2&gt;帳號管理&lt;/h2&gt;{canReview &amp;&amp; &lt;Button className=&quot;action secondary&quot; onClick={() =&gt; setOpen(!open)}&gt;{open ? &#x27;收合帳號管理&#x27; : `查看帳號（${accounts.filter(a =&gt; a.status === &#x27;pending&#x27;).length} 筆待審核）`}&lt;/Button&gt;}&lt;/div&gt;
+    {error &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;notice error&quot;&gt;{error}&lt;Button className=&quot;action secondary&quot; onClick={load}&gt;重試&lt;/Button&gt;&lt;/p&gt;}
+    {open &amp;&amp; &lt;&gt;&lt;p className=&quot;form-help&quot;&gt;一般管理員可管理所有工作坊；系統管理者可編輯、啟用與停用帳號。停用後，後續資料操作會被拒絕。&lt;/p&gt;&lt;div className=&quot;station-settings-grid&quot;&gt;{accounts.map(account =&gt; &lt;article className=&quot;station-setting account-card&quot; key={account.email}&gt;
+      &lt;h3&gt;{account.name}&lt;/h3&gt;&lt;p style={{ overflowWrap: &#x27;anywhere&#x27; }}&gt;{account.email}&lt;/p&gt;&lt;p&gt;{account.reason}&lt;/p&gt;&lt;p className={`form-help account-status ${account.status}`}&gt;{labels[account.status]} · {account.systemAdmin ? &#x27;系統管理者&#x27; : &#x27;一般管理員&#x27;}&lt;/p&gt;
+      {editing === account.email &amp;&amp; &lt;form className=&quot;entry-form&quot; onSubmit={async (event) =&gt; {
+        event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_update_backend_account&#x27;, { body: { email: account.email, name: fields.get(&#x27;name&#x27;), reason: fields.get(&#x27;reason&#x27;) } }); setEditing(null); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name=&quot;name&quot; required maxLength={100} defaultValue={account.name} /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name=&quot;reason&quot; required maxLength={500} defaultValue={account.reason} /&gt;&lt;/label&gt;&lt;Button className=&quot;action&quot; type=&quot;submit&quot;&gt;儲存修改&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+      &lt;div className=&quot;account-card-actions&quot;&gt;
+      &lt;Button className=&quot;action secondary&quot; disabled={busy} onClick={() =&gt; setEditing(editing === account.email ? null : account.email)}&gt;{editing === account.email ? &#x27;取消修改&#x27; : &#x27;修改資料&#x27;}&lt;/Button&gt;
+      {account.status === &#x27;active&#x27; &amp;&amp; !account.protected &amp;&amp; &lt;Button className=&quot;action secondary&quot; disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_set_backend_role&#x27;, { body: { email: account.email, systemAdmin: !account.systemAdmin } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.systemAdmin ? &#x27;改為一般管理員&#x27; : &#x27;升為系統管理者&#x27;}&lt;/Button&gt;}
+      {!account.protected &amp;&amp; &lt;Button className={account.status === &#x27;active&#x27; ? &#x27;action destructive&#x27; : &#x27;action&#x27;} disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_set_backend_account&#x27;, { body: { email: account.email, enabled: account.status !== &#x27;active&#x27; } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.status === &#x27;active&#x27; ? &#x27;停用帳號&#x27; : &#x27;啟用帳號&#x27;}&lt;/Button&gt;}
+      &lt;/div&gt;
+    &lt;/article&gt;)}&lt;/div&gt;&lt;/&gt;}
+  &lt;/section&gt;;
+}
+
+type ArchivedWorkshop = { id: string; name: string; archivedAt: string };
+export function ArchivedWorkshops() {
+  const [items, setItems] = useState&lt;ArchivedWorkshop[]&gt;([]);
+  const [error, setError] = useState(&#x27;&#x27;);
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState&lt;string | null&gt;(null);
+  async function load() {
+    try { setError(&#x27;&#x27;); setItems(await rpc&lt;ArchivedWorkshop[]&gt;(&#x27;nptc_archived_workshops&#x27;)); }
+    catch (cause) { setError((cause as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  return &lt;section className=&quot;data-panel&quot; style={{ marginTop: 24 }}&gt;&lt;div className=&quot;panel-heading&quot;&gt;&lt;h2&gt;已封存梯次&lt;/h2&gt;&lt;Button className=&quot;action secondary&quot; onClick={load}&gt;重新整理&lt;/Button&gt;&lt;/div&gt;
+    &lt;p className=&quot;form-help&quot;&gt;封存會保留名冊與成績，並停止修改。還原後會重新出現在梯次清單；永久刪除會移除該梯次及其名冊、成績與回饋。&lt;/p&gt;
+    {error &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;notice error&quot;&gt;{error}&lt;/p&gt;}
+    {!items.length ? &lt;p&gt;目前沒有已封存梯次。&lt;/p&gt; : &lt;div className=&quot;station-settings-grid&quot;&gt;{items.map(item =&gt; &lt;article className=&quot;station-setting&quot; key={item.id}&gt;
+      &lt;h3&gt;{item.name}&lt;/h3&gt;&lt;p className=&quot;form-help&quot;&gt;封存時間：{new Date(item.archivedAt).toLocaleString(&#x27;zh-TW&#x27;)}&lt;/p&gt;
+      &lt;Button className=&quot;action secondary&quot; disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_set_workshop_archived&#x27;, { body: { workshopId: item.id, archived: false } }); await load(); }
+        catch(cause) { setError((cause as Error).message); } finally { setBusy(false); }
+      }}&gt;還原梯次&lt;/Button&gt;
+      &lt;Button className=&quot;action destructive&quot; disabled={busy} onClick={() =&gt; setDeleting(deleting === item.id ? null : item.id)}&gt;{deleting === item.id ? &#x27;取消刪除&#x27; : &#x27;永久刪除&#x27;}&lt;/Button&gt;
+      {deleting === item.id &amp;&amp; &lt;ConfirmWorkshopAction action=&quot;delete&quot; workshop={item} onCancel={() =&gt; setDeleting(null)} onSuccess={async () =&gt; { setDeleting(null); await load(); }}/&gt;}
+    &lt;/article&gt;)}&lt;/div&gt;}
+  &lt;/section&gt;;
+}
+</pre></section><section><h3>修改後</h3><button onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent)">複製完整檔案</button><pre>import { useEffect, useState } from &#x27;react&#x27;;
+import { rpc, supabase } from &#x27;@/lib/supabase&#x27;;
+import { DEMO_MODE, signOutDemo } from &#x27;@/lib/demo&#x27;;
+import { Button } from &#x27;@/components/ui/button&#x27;;
+import { Input } from &#x27;@/components/ui/input&#x27;;
+import { ConfirmWorkshopAction } from &#x27;@/components/confirm-workshop-action&#x27;;
+import { BackendEntryLayout } from &#x27;@/components/backend-login&#x27;;
+import Link from &#x27;@/components/link&#x27;;
+
+type Account = { email: string; name: string; reason: string; status: &#x27;pending&#x27; | &#x27;active&#x27; | &#x27;disabled&#x27;; protected?: boolean; systemAdmin?: boolean };
+type Status = { application: Account | null; canReview: boolean };
+const labels = { pending: &#x27;等待審核&#x27;, active: &#x27;已啟用&#x27;, disabled: &#x27;已停用&#x27; };
+
+export function BackendApplication({ email }: { email: string }) {
+  const [applying, setApplying] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState(&#x27;&#x27;);
+  return &lt;BackendEntryLayout&gt;
+    &lt;h2 className=&quot;text-2xl font-black&quot;&gt;後臺管理系統登入&lt;/h2&gt;
+    &lt;div role=&quot;alert&quot; className=&quot;mt-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700&quot;&gt;
+      &lt;p className=&quot;break-all font-bold&quot; style={{ color: &#x27;inherit&#x27; }}&gt;目前登入帳號：{email}&lt;/p&gt;
+      &lt;p className=&quot;mt-2 leading-7&quot; style={{ color: &#x27;inherit&#x27; }}&gt;此帳號尚無後臺管理權限。請登出後使用管理員帳號登入，或申請後臺管理權限。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;div className=&quot;mt-6 flex flex-col gap-4&quot;&gt;
+      &lt;Button type=&quot;button&quot; disabled={signingOut} className=&quot;h-auto min-h-12 whitespace-normal py-3&quot; onClick={async () =&gt; {
+        setSigningOut(true); setSignOutError(&#x27;&#x27;);
+        try {
+          if (DEMO_MODE) { signOutDemo(); location.reload(); return; }
+          const { error } = await supabase.auth.signOut({ scope: &#x27;local&#x27; });
+          if (error) throw error;
+        } catch {
+          setSignOutError(&#x27;登出未完成，請稍後重試。&#x27;);
+          setSigningOut(false);
+        }
+      }}&gt;{signingOut ? &#x27;登出中…&#x27; : &#x27;登出並使用管理員帳號登入&#x27;}&lt;/Button&gt;
+      &lt;Button type=&quot;button&quot; variant=&quot;outline&quot; disabled={signingOut} aria-expanded={applying} aria-controls=&quot;backend-permission-application&quot; onClick={() =&gt; setApplying(!applying)}&gt;{applying ? &#x27;收合申請表&#x27; : &#x27;申請後臺管理權限&#x27;}&lt;/Button&gt;
+      &lt;Link href=&quot;/student/&quot; className=&quot;text-center underline&quot;&gt;返回學員專區&lt;/Link&gt;
+    &lt;/div&gt;
+    {signOutError &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;mt-4 text-red-700&quot;&gt;{signOutError}&lt;/p&gt;}
+    {applying &amp;&amp; &lt;div id=&quot;backend-permission-application&quot; className=&quot;mt-7 border-t pt-6&quot;&gt;&lt;BackendApplicationForm email={email}/&gt;&lt;/div&gt;}
+  &lt;/BackendEntryLayout&gt;;
+}
+
+function BackendApplicationForm({ email }: { email: string }) {
+  const [status, setStatus] = useState&lt;Status | null&gt;(null);
+  const [error, setError] = useState(&#x27;&#x27;);
+  const [busy, setBusy] = useState(false);
+  async function refresh() {
+    setError(&#x27;&#x27;);
+    try {
+      let current = await rpc&lt;Status&gt;(&#x27;nptc_backend_account_status&#x27;);
+      if (!current.application) {
+        const { data, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        // Metadata is application text only. Approval remains in the guarded RPC.
+        const draft = data.user?.user_metadata?.backend_application;
+        if (typeof draft?.name === &#x27;string&#x27; &amp;&amp; typeof draft?.reason === &#x27;string&#x27; &amp;&amp; draft.name.trim() &amp;&amp; draft.reason.trim()) {
+          current = await rpc&lt;Status&gt;(&#x27;nptc_apply_backend_account&#x27;, { body: { name: draft.name, reason: draft.reason } });
+        }
+      }
+      setStatus(current);
+    }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void refresh(); }, []);
+  return &lt;section&gt;&lt;h3 className=&quot;text-xl font-bold&quot;&gt;申請後臺管理權限&lt;/h3&gt;&lt;p className=&quot;form-help break-all&quot;&gt;申請帳號：{email}&lt;/p&gt;
+    {error &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;notice error&quot;&gt;{error}&lt;/p&gt;}
+    {!status ? &lt;Button className=&quot;action&quot; onClick={refresh}&gt;重新載入申請狀態&lt;/Button&gt; : status.application ? &lt;&gt;
+      &lt;h2&gt;{labels[status.application.status]}&lt;/h2&gt;&lt;p className=&quot;form-help&quot;&gt;{status.application.status === &#x27;pending&#x27; ? &#x27;申請已送出，請等待系統管理者啟用帳號。&#x27; : status.application.status === &#x27;disabled&#x27; ? &#x27;目前無法使用後臺功能，請聯絡系統管理者協助。&#x27; : &#x27;帳號已啟用，請重新載入進入後臺。&#x27;}&lt;/p&gt;
+      &lt;Button className=&quot;action&quot; onClick={() =&gt; location.reload()}&gt;重新確認啟用狀態&lt;/Button&gt;
+    &lt;/&gt; : &lt;form className=&quot;entry-form&quot; onSubmit={async (event) =&gt; {
+      event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError(&#x27;&#x27;);
+      try { setStatus(await rpc&lt;Status&gt;(&#x27;nptc_apply_backend_account&#x27;, { body: { name: fields.get(&#x27;name&#x27;), reason: fields.get(&#x27;reason&#x27;) } })); }
+      catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+    }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name=&quot;name&quot; required maxLength={100} autoComplete=&quot;name&quot; /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name=&quot;reason&quot; required maxLength={500} placeholder=&quot;例如：協助工作坊評分與名冊管理&quot; /&gt;&lt;/label&gt;&lt;p className=&quot;form-help&quot;&gt;系統管理者啟用後，即以一般管理員身分管理工作坊、學員名冊與成績。&lt;/p&gt;&lt;Button className=&quot;action&quot; type=&quot;submit&quot;&gt;{busy ? &#x27;送出中…&#x27; : &#x27;送出帳號申請&#x27;}&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+  &lt;/section&gt;;
+}
+
+export function BackendAccounts({ expanded = false }: { expanded?: boolean }) {
+  const [canReview, setCanReview] = useState(false);
+  const [accounts, setAccounts] = useState&lt;Account[]&gt;([]);
+  const [open, setOpen] = useState(expanded);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(&#x27;&#x27;);
+  const [editing, setEditing] = useState&lt;string | null&gt;(null);
+  async function load() {
+    setError(&#x27;&#x27;);
+    try {
+      const status = await rpc&lt;Status&gt;(&#x27;nptc_backend_account_status&#x27;); setCanReview(status.canReview);
+      if (status.canReview) setAccounts(await rpc&lt;Account[]&gt;(&#x27;nptc_backend_accounts&#x27;));
+    } catch(e) { setError((e as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  if (!canReview &amp;&amp; !error) return null;
+  return &lt;section className=&quot;data-panel&quot; style={{ marginTop: 24 }}&gt;
+    &lt;div className=&quot;panel-heading&quot;&gt;&lt;h2&gt;帳號管理&lt;/h2&gt;{canReview &amp;&amp; &lt;Button className=&quot;action secondary&quot; onClick={() =&gt; setOpen(!open)}&gt;{open ? &#x27;收合帳號管理&#x27; : `查看帳號（${accounts.filter(a =&gt; a.status === &#x27;pending&#x27;).length} 筆待審核）`}&lt;/Button&gt;}&lt;/div&gt;
+    {error &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;notice error&quot;&gt;{error}&lt;Button className=&quot;action secondary&quot; onClick={load}&gt;重試&lt;/Button&gt;&lt;/p&gt;}
+    {open &amp;&amp; &lt;&gt;&lt;p className=&quot;form-help&quot;&gt;一般管理員可管理所有工作坊；系統管理者可編輯、啟用與停用帳號。停用後，後續資料操作會被拒絕。&lt;/p&gt;&lt;div className=&quot;station-settings-grid&quot;&gt;{accounts.map(account =&gt; &lt;article className=&quot;station-setting account-card&quot; key={account.email}&gt;
+      &lt;h3&gt;{account.name}&lt;/h3&gt;&lt;p style={{ overflowWrap: &#x27;anywhere&#x27; }}&gt;{account.email}&lt;/p&gt;&lt;p&gt;{account.reason}&lt;/p&gt;&lt;p className={`form-help account-status ${account.status}`}&gt;{labels[account.status]} · {account.systemAdmin ? &#x27;系統管理者&#x27; : &#x27;一般管理員&#x27;}&lt;/p&gt;
+      {editing === account.email &amp;&amp; &lt;form className=&quot;entry-form&quot; onSubmit={async (event) =&gt; {
+        event.preventDefault(); const fields = new FormData(event.currentTarget); setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_update_backend_account&#x27;, { body: { email: account.email, name: fields.get(&#x27;name&#x27;), reason: fields.get(&#x27;reason&#x27;) } }); setEditing(null); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;&lt;fieldset disabled={busy}&gt;&lt;label&gt;姓名&lt;Input name=&quot;name&quot; required maxLength={100} defaultValue={account.name} /&gt;&lt;/label&gt;&lt;label&gt;申請用途&lt;Input name=&quot;reason&quot; required maxLength={500} defaultValue={account.reason} /&gt;&lt;/label&gt;&lt;Button className=&quot;action&quot; type=&quot;submit&quot;&gt;儲存修改&lt;/Button&gt;&lt;/fieldset&gt;&lt;/form&gt;}
+      &lt;div className=&quot;account-card-actions&quot;&gt;
+      &lt;Button className=&quot;action secondary&quot; disabled={busy} onClick={() =&gt; setEditing(editing === account.email ? null : account.email)}&gt;{editing === account.email ? &#x27;取消修改&#x27; : &#x27;修改資料&#x27;}&lt;/Button&gt;
+      {account.status === &#x27;active&#x27; &amp;&amp; !account.protected &amp;&amp; &lt;Button className=&quot;action secondary&quot; disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_set_backend_role&#x27;, { body: { email: account.email, systemAdmin: !account.systemAdmin } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.systemAdmin ? &#x27;改為一般管理員&#x27; : &#x27;升為系統管理者&#x27;}&lt;/Button&gt;}
+      {!account.protected &amp;&amp; &lt;Button className={account.status === &#x27;active&#x27; ? &#x27;action destructive&#x27; : &#x27;action&#x27;} disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_set_backend_account&#x27;, { body: { email: account.email, enabled: account.status !== &#x27;active&#x27; } }); await load(); }
+        catch(e) { setError((e as Error).message); } finally { setBusy(false); }
+      }}&gt;{account.status === &#x27;active&#x27; ? &#x27;停用帳號&#x27; : &#x27;啟用帳號&#x27;}&lt;/Button&gt;}
+      &lt;/div&gt;
+    &lt;/article&gt;)}&lt;/div&gt;&lt;/&gt;}
+  &lt;/section&gt;;
+}
+
+type ArchivedWorkshop = { id: string; name: string; archivedAt: string };
+export function ArchivedWorkshops() {
+  const [items, setItems] = useState&lt;ArchivedWorkshop[]&gt;([]);
+  const [error, setError] = useState(&#x27;&#x27;);
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState&lt;string | null&gt;(null);
+  async function load() {
+    try { setError(&#x27;&#x27;); setItems(await rpc&lt;ArchivedWorkshop[]&gt;(&#x27;nptc_archived_workshops&#x27;)); }
+    catch (cause) { setError((cause as Error).message); }
+  }
+  useEffect(() =&gt; { void load(); }, []);
+  return &lt;section className=&quot;data-panel&quot; style={{ marginTop: 24 }}&gt;&lt;div className=&quot;panel-heading&quot;&gt;&lt;h2&gt;已封存梯次&lt;/h2&gt;&lt;Button className=&quot;action secondary&quot; onClick={load}&gt;重新整理&lt;/Button&gt;&lt;/div&gt;
+    &lt;p className=&quot;form-help&quot;&gt;封存會保留名冊與成績，並停止修改。還原後會重新出現在梯次清單；永久刪除會移除該梯次及其名冊、成績與回饋。&lt;/p&gt;
+    {error &amp;&amp; &lt;p role=&quot;alert&quot; className=&quot;notice error&quot;&gt;{error}&lt;/p&gt;}
+    {!items.length ? &lt;p&gt;目前沒有已封存梯次。&lt;/p&gt; : &lt;div className=&quot;station-settings-grid&quot;&gt;{items.map(item =&gt; &lt;article className=&quot;station-setting&quot; key={item.id}&gt;
+      &lt;h3&gt;{item.name}&lt;/h3&gt;&lt;p className=&quot;form-help&quot;&gt;封存時間：{new Date(item.archivedAt).toLocaleString(&#x27;zh-TW&#x27;)}&lt;/p&gt;
+      &lt;Button className=&quot;action secondary&quot; disabled={busy} onClick={async () =&gt; {
+        setBusy(true); setError(&#x27;&#x27;);
+        try { await rpc(&#x27;nptc_set_workshop_archived&#x27;, { body: { workshopId: item.id, archived: false } }); await load(); }
+        catch(cause) { setError((cause as Error).message); } finally { setBusy(false); }
+      }}&gt;還原梯次&lt;/Button&gt;
+      &lt;Button className=&quot;action destructive&quot; disabled={busy} onClick={() =&gt; setDeleting(deleting === item.id ? null : item.id)}&gt;{deleting === item.id ? &#x27;取消刪除&#x27; : &#x27;永久刪除&#x27;}&lt;/Button&gt;
+      {deleting === item.id &amp;&amp; &lt;ConfirmWorkshopAction action=&quot;delete&quot; workshop={item} onCancel={() =&gt; setDeleting(null)} onSuccess={async () =&gt; { setDeleting(null); await load(); }}/&gt;}
+    &lt;/article&gt;)}&lt;/div&gt;}
+  &lt;/section&gt;;
+}
+</pre></section></div><h2>lib/survey-analysis.ts</h2><div class="pair"><section><h3>修改前</h3><button onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent)">複製完整檔案</button><pre>import type { SurveyAssignment, SurveyDefinition, SurveyScores } from &#x27;./surveys&#x27;;
+
+export type SurveyAnalysisWorkshop = { id: string; name: string; archived_at?: string | null };
+export type SurveyAnalysisStudent = { id: string; workshop_id: string; name: string; identity: string };
+export type SurveyAnalysisResponse = { assignment_id: string; student_id: string; identity: string; submitted_at: string; answers: number[]; scores: SurveyScores };
+export type SurveyAnalysisData = { includesArchived: boolean; workshops: SurveyAnalysisWorkshop[]; students: SurveyAnalysisStudent[]; assignments: SurveyAssignment[]; responses: SurveyAnalysisResponse[] };
+export type SurveyPerson = { identity: string; names: string; studentIds: string[]; workshopIds: string[] };
+export type SurveyTrendPoint = { id: string; label: string; date: string; workshop: string; value: number | null; count: number };
+export const scaleKey = (a: Pick&lt;SurveyAssignment, &#x27;scale_code&#x27; | &#x27;scale_version&#x27;&gt;) =&gt; JSON.stringify([a.scale_code, a.scale_version]);
+export const dimensionLabel = (name: string) =&gt; name === &#x27;flexibility&#x27; ? &#x27;思考彈性&#x27; : name === &#x27;structure&#x27; ? &#x27;記憶中的知識結構&#x27; : name;
+export function metricValue(scores: SurveyScores, metric: string): number | null {
+  const name = metric.startsWith(&#x27;dimension:&#x27;) ? metric.slice(10) : metric;
+  const value = metric === &#x27;total&#x27; ? scores.total : scores.dimensions?.[name] ?? (name === &#x27;flexibility&#x27; ? scores.flexibility : name === &#x27;structure&#x27; ? scores.structure : undefined);
+  return typeof value === &#x27;number&#x27; &amp;&amp; Number.isFinite(value) ? value : null;
+}
+export function metricRange(definition: SurveyDefinition, metric: string) {
+  const name = metric.startsWith(&#x27;dimension:&#x27;) ? metric.slice(10) : metric;
+  const count = metric === &#x27;total&#x27; ? definition.items.length : definition.dimensions?.[name]?.length ?? definition.items.length;
+  return { min: count * (definition.minScore ?? 1), max: count * (definition.maxScore ?? 6) };
+}
+export function orderedAssignments(assignments: SurveyAssignment[]) {
+  return [...assignments].sort((a, b) =&gt; (Date.parse(a.created_at ?? &#x27;&#x27;) || 0) - (Date.parse(b.created_at ?? &#x27;&#x27;) || 0) || a.id.localeCompare(b.id));
+}
+export function surveyPeople(data: SurveyAnalysisData, assignments: SurveyAssignment[]): SurveyPerson[] {
+  const workshops = new Set(assignments.map(a =&gt; a.workshop_id));
+  const assignmentIds = new Set(assignments.map(a =&gt; a.id));
+  const groups = new Map&lt;string, { names: Set&lt;string&gt;; students: Set&lt;string&gt;; workshops: Set&lt;string&gt; }&gt;();
+  const add = (identity: string, s: SurveyAnalysisStudent) =&gt; {
+    const group = groups.get(identity) ?? { names: new Set&lt;string&gt;(), students: new Set&lt;string&gt;(), workshops: new Set&lt;string&gt;() };
+    group.names.add(s.name); group.students.add(s.id); group.workshops.add(s.workshop_id); groups.set(identity, group);
+  };
+  data.students.filter(s =&gt; workshops.has(s.workshop_id)).forEach(s =&gt; add(s.identity, s));
+  // A historical response keeps its original account identity even if an account is later replaced.
+  data.responses.filter(r =&gt; assignmentIds.has(r.assignment_id)).forEach(r =&gt; { const s = data.students.find(s =&gt; s.id === r.student_id); if (s) add(r.identity, s); });
+  return [...groups].map(([identity, group]) =&gt; ({ identity, names: [...group.names].join(&#x27;／&#x27;), studentIds: [...group.students], workshopIds: [...group.workshops] })).sort((a, b) =&gt; a.names.localeCompare(b.names, &#x27;zh-Hant-TW-u-co-stroke&#x27;) || a.identity.localeCompare(b.identity));
+}
+export function surveyTrend(data: SurveyAnalysisData, assignments: SurveyAssignment[], people: SurveyPerson[], metric: string): SurveyTrendPoint[] {
+  const identities = new Set(people.map(p =&gt; p.identity));
+  return orderedAssignments(assignments).map((a, i) =&gt; {
+    const values = data.responses.filter(r =&gt; r.assignment_id === a.id &amp;&amp; identities.has(r.identity)).map(r =&gt; metricValue(r.scores, metric)).filter((n): n is number =&gt; n !== null);
+    return { id: a.id, label: a.note || `第 ${i + 1} 次發布`, date: a.created_at ?? &#x27;&#x27;, workshop: data.workshops.find(w =&gt; w.id === a.workshop_id)?.name ?? &#x27;&#x27;, value: values.length ? values.reduce((sum, n) =&gt; sum + n, 0) / values.length : null, count: values.length };
+  });
+}
+</pre></section><section><h3>修改後</h3><button onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent)">複製完整檔案</button><pre>import type { SurveyAssignment, SurveyDefinition, SurveyScores } from &#x27;./surveys&#x27;;
+
+export type SurveyAnalysisWorkshop = { id: string; name: string; archived_at?: string | null };
+export type SurveyAnalysisStudent = { id: string; workshop_id: string; name: string; identity: string };
+export type SurveyAnalysisResponse = { assignment_id: string; student_id: string; identity: string; submitted_at: string; answers: number[]; scores: SurveyScores };
+export type SurveyAnalysisData = { includesArchived: boolean; workshops: SurveyAnalysisWorkshop[]; students: SurveyAnalysisStudent[]; assignments: SurveyAssignment[]; responses: SurveyAnalysisResponse[] };
+export type SurveyPerson = { identity: string; names: string; studentIds: string[]; workshopIds: string[] };
+export type SurveyTrendPoint = { id: string; label: string; date: string; workshop: string; value: number | null; count: number };
+export const scaleKey = (a: Pick&lt;SurveyAssignment, &#x27;scale_code&#x27; | &#x27;scale_version&#x27;&gt;) =&gt; JSON.stringify([a.scale_code, a.scale_version]);
+export const dimensionLabel = (name: string) =&gt; name === &#x27;flexibility&#x27; ? &#x27;思考彈性&#x27; : name === &#x27;structure&#x27; ? &#x27;記憶中的知識結構&#x27; : name;
+export function metricValue(scores: SurveyScores, metric: string): number | null {
+  const name = metric.startsWith(&#x27;dimension:&#x27;) ? metric.slice(10) : metric;
+  const value = metric === &#x27;total&#x27; ? scores.total : scores.dimensions?.[name] ?? (name === &#x27;flexibility&#x27; ? scores.flexibility : name === &#x27;structure&#x27; ? scores.structure : undefined);
+  return typeof value === &#x27;number&#x27; &amp;&amp; Number.isFinite(value) ? value : null;
+}
+export function metricRange(definition: SurveyDefinition, metric: string) {
+  const name = metric.startsWith(&#x27;dimension:&#x27;) ? metric.slice(10) : metric;
+  const count = metric === &#x27;total&#x27; ? definition.items.length : definition.dimensions?.[name]?.length ?? definition.items.length;
+  return { min: count * (definition.minScore ?? 1), max: count * (definition.maxScore ?? 6) };
+}
+export function orderedAssignments(assignments: SurveyAssignment[]) {
+  // Equal timestamps retain the supplied publication order; UUID order is not chronology.
+  return [...assignments].sort((a, b) =&gt; (Date.parse(a.created_at ?? &#x27;&#x27;) || 0) - (Date.parse(b.created_at ?? &#x27;&#x27;) || 0));
+}
+export function surveyPeople(data: SurveyAnalysisData, assignments: SurveyAssignment[]): SurveyPerson[] {
+  const workshops = new Set(assignments.map(a =&gt; a.workshop_id));
+  const assignmentIds = new Set(assignments.map(a =&gt; a.id));
+  const groups = new Map&lt;string, { names: Set&lt;string&gt;; students: Set&lt;string&gt;; workshops: Set&lt;string&gt; }&gt;();
+  const add = (identity: string, s: SurveyAnalysisStudent) =&gt; {
+    const group = groups.get(identity) ?? { names: new Set&lt;string&gt;(), students: new Set&lt;string&gt;(), workshops: new Set&lt;string&gt;() };
+    group.names.add(s.name); group.students.add(s.id); group.workshops.add(s.workshop_id); groups.set(identity, group);
+  };
+  data.students.filter(s =&gt; workshops.has(s.workshop_id)).forEach(s =&gt; add(s.identity, s));
+  // A historical response keeps its original account identity even if an account is later replaced.
+  data.responses.filter(r =&gt; assignmentIds.has(r.assignment_id)).forEach(r =&gt; { const s = data.students.find(s =&gt; s.id === r.student_id); if (s) add(r.identity, s); });
+  return [...groups].map(([identity, group]) =&gt; ({ identity, names: [...group.names].join(&#x27;／&#x27;), studentIds: [...group.students], workshopIds: [...group.workshops] })).sort((a, b) =&gt; a.names.localeCompare(b.names, &#x27;zh-Hant-TW-u-co-stroke&#x27;) || a.identity.localeCompare(b.identity));
+}
+export function surveyTrend(data: SurveyAnalysisData, assignments: SurveyAssignment[], people: SurveyPerson[], metric: string): SurveyTrendPoint[] {
+  const identities = new Set(people.map(p =&gt; p.identity));
+  return orderedAssignments(assignments).map((a, i) =&gt; {
+    const values = data.responses.filter(r =&gt; r.assignment_id === a.id &amp;&amp; identities.has(r.identity)).map(r =&gt; metricValue(r.scores, metric)).filter((n): n is number =&gt; n !== null);
+    return { id: a.id, label: a.note || `第 ${i + 1} 次發布`, date: a.created_at ?? &#x27;&#x27;, workshop: data.workshops.find(w =&gt; w.id === a.workshop_id)?.name ?? &#x27;&#x27;, value: values.length ? values.reduce((sum, n) =&gt; sum + n, 0) / values.length : null, count: values.length };
+  });
+}
+</pre></section></div></html>

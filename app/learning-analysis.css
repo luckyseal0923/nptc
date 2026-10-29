@@ -4,3 +4,26 @@
 .learning-analysis .analysis-student-exams{min-width:1080px;table-layout:fixed}.analysis-student-exams th:first-child{width:220px}.analysis-student-exams th:last-child{width:150px}.analysis-student-exams .analysis-student-row>td{min-width:0;text-align:center;vertical-align:middle}.analysis-student-exams thead th:not(:first-child){text-align:center}.analysis-student-exams .analysis-student-row>td>small{text-align:center}.learning-analysis .analysis-exam-score{font-size:22px;display:block;font-weight:650;text-align:center}.learning-analysis .analysis-exam-score small{display:inline;margin-left:4px;font-size:12px;font-weight:400}.analysis-result{display:inline-block;padding:4px 9px;border-radius:5px;font-size:12px;margin-top:9px}.analysis-result.pass{color:#176047;background:#e9f4ed}.analysis-result.fail{color:#a12924;background:#fff0ee}.analysis-result.pending{color:#626862;background:#f0f2ee}.analysis-fail-count{font-size:19px;font-weight:650;white-space:nowrap}
 .analysis-student-row.expanded>*{background:#f1f7ed}.analysis-person-row>td{padding:0;background:#f8fbf6}.analysis-person-inline{padding:24px;border-radius:0 0 10px 10px}.analysis-person-inline>p{color:#56716c;font-size:14px;margin-top:8px}
 .learning-analysis .analysis-history-table{min-width:1000px;table-layout:fixed}.analysis-history-table th:nth-child(1){width:14%}.analysis-history-table th:nth-child(2){width:20%}.analysis-history-table th:nth-child(3){width:16%}.analysis-history-table th:nth-child(4){width:12%}.analysis-history-table th:nth-child(5){width:13%}.analysis-history-table th:nth-child(6){width:25%}.analysis-history-table th:nth-child(n+3):nth-child(-n+5),.analysis-history-table td:nth-child(n+3):nth-child(-n+5){text-align:center;vertical-align:middle}.analysis-history-table td:nth-child(3) .analysis-score{margin-inline:auto}.analysis-history-table .analysis-feedback{min-width:0;max-width:none;line-height:1.7}
+
+/* Separate OSCE analysis and instructor-only survey scores. */
+.analysis-workspace{display:grid;gap:25px;min-width:0}
+.analysis-area-tabs{display:flex;flex-wrap:wrap;gap:8px;padding:6px;background:#edf2e8;border:1px solid #d2ddce;border-radius:10px;justify-self:start;max-width:100%}
+.analysis-area-tabs button{padding:11px 22px;border-radius:6px;font-size:15px;font-weight:650;color:#53705c;cursor:pointer}
+.analysis-area-tabs button[aria-current=page]{background:#fff;color:#174943;box-shadow:0 1px 5px #183c2812}
+.analysis-area-tabs button:focus-visible{outline:2px solid #398274;outline-offset:2px}
+.survey-analysis-filters{display:grid;grid-template-columns:1.1fr 1.5fr 1fr 1.2fr 1fr;gap:16px;align-items:end}
+.survey-learning-analysis .analysis-note{margin:0}
+.survey-trend-figure{margin:24px 0 10px;padding:18px 14px 10px;border:1px solid #e0e9dc;border-radius:10px;background:linear-gradient(180deg,#fbfdf8,#fff)}
+.survey-trend-chart-scroll{overflow-x:auto;max-width:100%;padding-top:3px}
+.survey-trend-figure svg{display:block;width:100%;min-width:640px;height:auto;font-family:inherit}
+.survey-trend-figure figcaption{font-size:12px;line-height:1.8;color:#62796c;padding:7px 14px 2px}
+.survey-trend-point:focus{outline:none}.survey-trend-point:focus circle,.survey-trend-point:hover circle{fill:#d4e9c9;stroke-width:4}
+.learning-analysis .survey-trend-summary th:first-child{min-width:150px}.survey-trend-summary th:nth-child(n+3),.survey-trend-summary td:nth-child(n+3){text-align:center}
+.learning-analysis .survey-student-scores{min-width:680px}.survey-student-scores th:first-child{min-width:150px}.survey-student-scores th:not(:first-child),.survey-student-scores td{text-align:center;min-width:145px}
+.survey-student-scores th small,.survey-student-scores td small{font-size:11px;line-height:1.7}
+.learning-analysis .survey-score-button{font-size:20px;font-weight:700;color:#1e6550;background:#eef6e8;border:1px solid #d0e1c8;border-radius:7px;padding:7px 14px;cursor:pointer;white-space:nowrap}
+.learning-analysis .survey-score-button:hover{background:#e0efda;border-color:#84aa79}
+.survey-answer-detail{border-color:#8db294;scroll-margin-top:20px}.survey-answer-statement{min-width:300px;max-width:560px;line-height:1.85}.survey-answer-statement p+p{margin-top:8px}.survey-answer-detail td:nth-child(n+3){text-align:center;font-size:17px;font-weight:600}
+@media(max-width:1100px){.survey-analysis-filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){.survey-analysis-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.analysis-area-tabs{width:100%;justify-self:stretch}.analysis-area-tabs button{flex:1;padding:10px 12px;font-size:14px}.survey-trend-figure{padding:10px 6px 7px}.survey-trend-figure figcaption{padding-left:8px}}
+@media(max-width:480px){.survey-analysis-filters{grid-template-columns:1fr}.survey-learning-analysis .analysis-metrics strong{font-size:23px}}
